@@ -1,0 +1,22 @@
+# Copyright AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions: read-all
+
+jobs:
+  success:
+    name: Success
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Success
+        run: echo "::notice::Success! All checks passed."
+
