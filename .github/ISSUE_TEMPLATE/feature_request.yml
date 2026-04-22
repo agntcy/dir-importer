@@ -1,3 +1,6 @@
+# Copyright AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+
 ---
 name: Feature Request
 description: Suggest a feature for this project.
@@ -53,3 +56,4 @@ body:
         - label: |
             I have verified this does not duplicate an existing feature request
           required: true
+
