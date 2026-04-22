@@ -1,0 +1,63 @@
+# Copyright AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+
+version: "3"
+
+vars:
+  BIN_DIR: '{{ .BIN_DIR | default "./bin" }}'
+  UV_VERSION: "0.10.11"
+  UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  deps:bin-dir:
+    internal: true
+    cmds:
+      - mkdir -p {{ .BIN_DIR }}
+    status:
+      - test -d {{ .BIN_DIR }}
+
+  deps:uv:
+    desc: Install uv
+    deps:
+      - deps:bin-dir
+    env:
+      UV_INSTALL_DIR: "{{ .BIN_DIR }}"
+    cmds:
+      - curl -sfL https://astral.sh/uv/{{ .UV_VERSION }}/install.sh | sh
+      - mv {{ .BIN_DIR }}/uv {{ .UV_BIN }}
+      - chmod +x {{ .UV_BIN }}
+      - rm -f {{ .BIN_DIR }}/uvx
+    status:
+      - test -x {{ .UV_BIN }}
+
+  deps:mcp-scanner:
+    desc: Install mcp-scanner CLI via uv
+    deps:
+      - deps:uv
+    cmds:
+      - echo "Installing mcp-scanner"
+      - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
+
+  build:
+    desc: Build the importer module
+    cmds:
+      - go build ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy go.mod
+    cmds:
+      - go mod tidy
