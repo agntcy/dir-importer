@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/dir-importer/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/oasf-sdk/pkg/translator"
 	mcpapiv0 "github.com/modelcontextprotocol/registry/pkg/api/v0"
 	"google.golang.org/protobuf/types/known/structpb"
