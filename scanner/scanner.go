@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "github.com/agntcy/dir/api/core/v1"
 	_ "github.com/agntcy/dir-importer/scanner/behavioral" // register behavioral scanner
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/scanner/factory"
 	scannertypes "github.com/agntcy/dir-importer/scanner/types"
 	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/dir/utils/logging"
 )
 

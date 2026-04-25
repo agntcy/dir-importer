@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/agntcy/dir-importer"
+	importer "github.com/agntcy/dir-importer"
 	"github.com/agntcy/dir-importer/config"
 	"github.com/agntcy/dir-importer/types"
 )
