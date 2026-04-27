@@ -13,9 +13,9 @@ import (
 	"strings"
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
-	corev1 "github.com/agntcy/dir/api/core/v1"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/scanner/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/dir/utils/logging"
 	"google.golang.org/protobuf/types/known/structpb"
 )

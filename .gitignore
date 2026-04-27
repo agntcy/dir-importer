@@ -1,0 +1,32 @@
+# IDEs
+.vscode/
+.idea/
+.continue/
+
+# Secrets
+.env
+.envrc
+
+# Builds
+.bin/
+bin/
+
+# MacOS
+.DS_Store
+
+# Coverage output
+coverage.out
+.coverage/
+
+# Licensei
+.licensei.cache
+
+# Go workspace files
+go.work
+go.work.sum
+
+# AI
+.cursor/
+
+# Logs
+*.log

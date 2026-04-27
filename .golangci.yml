@@ -1,0 +1,59 @@
+version: "2"
+linters:
+  default: all
+  disable:
+    - depguard
+    - embeddedstructfieldcheck
+    - err113
+    - exhaustruct
+    - funcorder
+    - funlen
+    - godoclint
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - gomoddirectives
+    - inamedparam
+    - ireturn
+    - lll
+    - noinlineerr
+    - nolintlint
+    - paralleltest
+    - revive
+    - perfsprint
+    - prealloc
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wsl
+  settings:
+    cyclop:
+      max-complexity: 15
+    goheader:
+      values:
+        regexp:
+          YEAR: 202[4-6]
+      template: |-
+        Copyright AGNTCY Contributors (https://github.com/agntcy)
+        SPDX-License-Identifier: Apache-2.0
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$

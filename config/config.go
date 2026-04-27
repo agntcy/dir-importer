@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 
-	corev1 "github.com/agntcy/dir/api/core/v1"
-	searchv1 "github.com/agntcy/dir/api/search/v1"
-	"github.com/agntcy/dir/client/streaming"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
+	searchv1 "github.com/agntcy/dir/api/search/v1"
+	"github.com/agntcy/dir/client/streaming"
 )
 
 // ImportType identifies what to import and which fetch path to use (registry URL, local file, etc.).

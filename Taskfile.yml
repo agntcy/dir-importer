@@ -4,14 +4,52 @@
 version: "3"
 
 vars:
-  BIN_DIR: '{{ .BIN_DIR | default "./bin" }}'
+  BIN_DIR: '{{ .BIN_DIR | default "./.bin" }}'
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
 
 tasks:
   default:
+    desc: Show available tasks
+    cmd: task --list
+
+  build:
+    desc: Build the importer module
     cmds:
-      - task: build
+      - go build ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  license:
+    desc: Run license check
+    cmds:
+      - licensei cache
+      - licensei check
+
+  tidy:
+    desc: Tidy go.mod
+    cmds:
+      - go mod tidy
+
+  pre-commit:golangci-lint:
+    desc: Run golangci-lint pre-commit hook
+    cmds:
+      - golangci-lint run --fix {{.CLI_ARGS | default "./..."}}
+
+  deps:
+    desc: Install development dependencies and git hooks
+    cmds:
+      - pre-commit install
+    status:
+      - test -f .git/hooks/pre-commit
 
   deps:bin-dir:
     internal: true
@@ -42,22 +80,7 @@ tasks:
       - echo "Installing mcp-scanner"
       - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
 
-  build:
-    desc: Build the importer module
+  clean:
+    desc: Clean build artifacts
     cmds:
-      - go build ./...
-
-  test:
-    desc: Run unit tests
-    cmds:
-      - go test ./...
-
-  lint:
-    desc: Run go vet
-    cmds:
-      - go vet ./...
-
-  tidy:
-    desc: Tidy go.mod
-    cmds:
-      - go mod tidy
+      - rm -rf {{ .BIN_DIR }} coverage.out

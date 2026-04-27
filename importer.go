@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/dir-importer/config"
 	"github.com/agntcy/dir-importer/dedup"
 	"github.com/agntcy/dir-importer/enricher"
@@ -20,6 +19,7 @@ import (
 	"github.com/agntcy/dir-importer/scanner"
 	"github.com/agntcy/dir-importer/transformer"
 	"github.com/agntcy/dir-importer/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
 // Importer implements the Importer interface for MCP registry using a pipeline architecture.
