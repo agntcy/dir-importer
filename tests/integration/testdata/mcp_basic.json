@@ -1,0 +1,13 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.agntcy/integration-test-server",
+  "description": "Integration test fixture: minimal valid MCP server with one remote.",
+  "title": "Integration Test Server",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://example.invalid/mcp"
+    }
+  ]
+}
