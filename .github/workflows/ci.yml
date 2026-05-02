@@ -20,38 +20,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.result.outputs.code }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Check for code changes
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
-        id: filter
-        with:
-          filters: |
-            code:
-              - '**/*.go'
-              - 'go.mod'
-              - 'go.sum'
-              - '.golangci.yml'
-              - '.licensei.toml'
-              - 'Taskfile.yml'
-              - '.github/workflows/**'
-
-      - name: Determine result
-        id: result
-        run: |
-          echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
-
   lint:
     name: Lint
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -70,8 +40,6 @@ jobs:
 
   license:
     name: License
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -104,38 +72,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: licensei check
 
-  test:
-    name: Unit Test
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run unit tests
-        run: go test -race -coverprofile=coverage.out ./...
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
-        with:
-          files: coverage.out
-          flags: unit
-          codecov_yml_path: codecov.yml
-          use_oidc: true
-
   build:
     name: Build
     needs:
       - lint
       - license
-      - test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -153,21 +94,49 @@ jobs:
       - name: Build library
         run: task build
 
+  integration:
+    name: Integration Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Task
+        uses: go-task/setup-task@3be4020d41929789a01026e0e427a4321ce0ad44 # v2.0.0
+
+      - name: Run integration tests
+        run: task test:integration
+
+      - name: Dump compose logs on failure
+        if: failure()
+        working-directory: tests/integration
+        run: |
+          docker compose -p dir-importer-integration -f docker-compose.yaml ps || true
+          docker compose -p dir-importer-integration -f docker-compose.yaml logs --no-color --tail=500 || true
+
+      - name: Tear down stack
+        if: always()
+        working-directory: tests/integration
+        run: |
+          docker compose -p dir-importer-integration -f docker-compose.yaml down -v --remove-orphans || true
+
   success:
     name: Success
     if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
     needs:
-      - changes
       - lint
       - license
-      - test
       - build
+      - integration
     runs-on: ubuntu-latest
     steps:
       - name: Echo Success
-        run: |
-          if [[ "${{ needs.changes.outputs.code }}" == "true" ]]; then
-            echo "::notice::Success! All code checks passed."
-          else
-            echo "::notice::Success! No code changes detected, skipped builds and tests."
-          fi
+        run: echo "::notice::Success! All code checks passed."

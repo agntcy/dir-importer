@@ -1,0 +1,13 @@
+{
+  "model": "ollama:qwen3:8b",
+  "max-steps": 3,
+  "mcpServers": {
+    "dir-mcp-server": {
+      "command": "dirctl",
+      "args": ["mcp", "serve"],
+      "env": {
+        "DIRECTORY_CLIENT_SERVER_ADDRESS": "127.0.0.1:8888"
+      }
+    }
+  }
+}

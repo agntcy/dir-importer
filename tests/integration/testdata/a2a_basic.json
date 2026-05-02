@@ -1,0 +1,32 @@
+{
+  "name": "com.agntcy.integration-test/support-agent",
+  "description": "Integration test fixture: minimal valid A2A AgentCard with one skill and one interface.",
+  "version": "1.0.0",
+  "documentationUrl": "https://example.invalid/agents/support-agent",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "extendedAgentCard": false
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain", "application/json"],
+  "skills": [
+    {
+      "id": "ticketing.create",
+      "name": "Create ticket",
+      "description": "Opens a support ticket from a user message",
+      "tags": ["support", "ticketing"]
+    }
+  ],
+  "provider": {
+    "organization": "AGNTCY Integration Tests",
+    "url": "https://example.invalid"
+  },
+  "supportedInterfaces": [
+    {
+      "url": "https://example.invalid/support/a2a",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "0.3"
+    }
+  ]
+}

@@ -7,6 +7,15 @@ vars:
   BIN_DIR: '{{ .BIN_DIR | default "./.bin" }}'
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
+  OLLAMA_VERSION: "0.22.1"
+  OLLAMA_BIN: "{{ .BIN_DIR }}/ollama"
+  DIRCTL_VERSION: "1.2.0"
+  DIRCTL_BIN: "{{ .BIN_DIR }}/dirctl"
+  # v2.12.1 is the first release built with Go 1.26.x; this module pins go 1.26.2,
+  # so older lint binaries refuse to load .golangci.yml ("Go language version (go1.25)
+  # used to build golangci-lint is lower than the targeted Go version (1.26.2)").
+  GOLANGCI_LINT_VERSION: "2.12.1"
+  GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{.GOLANGCI_LINT_VERSION}}"
 
 tasks:
   default:
@@ -18,15 +27,23 @@ tasks:
     cmds:
       - go build ./...
 
-  test:
-    desc: Run unit tests
+  test:integration:
+    desc: Run live integration tests (requires Docker; first run pulls dir images and the qwen3:8b Ollama model)
+    deps:
+      - deps:ollama
+      - deps:dirctl
+    env:
+      OLLAMA_BIN: "{{ .OLLAMA_BIN }}"
+      DIRCTL_BIN: "{{ .DIRCTL_BIN }}"
     cmds:
-      - go test -race -coverprofile=coverage.out ./...
+      - go test -timeout=50m -count=1 -v ./tests/integration/...
 
   lint:
     desc: Run golangci-lint
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run ./...
+      - "{{ .GOLANGCI_LINT_BIN }} run ./..."
 
   license:
     desc: Run license check
@@ -41,8 +58,10 @@ tasks:
 
   pre-commit:golangci-lint:
     desc: Run golangci-lint pre-commit hook
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run --fix {{.CLI_ARGS | default "./..."}}
+      - "{{ .GOLANGCI_LINT_BIN }} run --fix {{ .CLI_ARGS | default \"./...\" }}"
 
   deps:
     desc: Install development dependencies and git hooks
@@ -79,6 +98,67 @@ tasks:
     cmds:
       - echo "Installing mcp-scanner"
       - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
+
+  deps:dirctl:
+    desc: Install the dirctl binary into BIN_DIR for the integration test harness
+    deps:
+      - deps:bin-dir
+    status:
+      - test -x {{ .DIRCTL_BIN }}
+    cmds:
+      - cmd: |
+          set -e
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) arch="amd64" ;;
+            aarch64) arch="arm64" ;;
+          esac
+          asset="dirctl-${os}-${arch}"
+          echo "Installing ${asset} v{{ .DIRCTL_VERSION }}..."
+          curl -sSfL "https://github.com/agntcy/dir/releases/download/v{{ .DIRCTL_VERSION }}/${asset}" -o "{{ .DIRCTL_BIN }}"
+          chmod +x "{{ .DIRCTL_BIN }}"
+
+  deps:ollama:
+    desc: Install Ollama into BIN_DIR (with its runtime libs) for the integration test harness
+    deps:
+      - deps:bin-dir
+    vars:
+      OLLAMA_DIST: "{{ .BIN_DIR }}/ollama-{{ .OLLAMA_VERSION }}-dist"
+    status:
+      - test -x {{ .OLLAMA_BIN }}
+    cmds:
+      - cmd: |
+          set -e
+          base="https://github.com/ollama/ollama/releases/download/v{{ .OLLAMA_VERSION }}"
+          rm -rf "{{ .OLLAMA_DIST }}" && mkdir -p "{{ .OLLAMA_DIST }}"
+          case "$(uname -s)-$(uname -m)" in
+            Darwin-*)            curl -sSfL "$base/ollama-darwin.tgz" | tar -xz -C "{{ .OLLAMA_DIST }}" ;;
+            Linux-x86_64|Linux-amd64) curl -sSfL "$base/ollama-linux-amd64.tar.zst" | zstd -d | tar -x -C "{{ .OLLAMA_DIST }}" ;;
+            *) echo "unsupported platform; install ollama manually and set OLLAMA_BIN" >&2; exit 1 ;;
+          esac
+          # Linux drops CUDA libs we never use on a CI runner; safe to no-op on darwin.
+          rm -rf "{{ .OLLAMA_DIST }}/lib/ollama/cuda_v12" "{{ .OLLAMA_DIST }}/lib/ollama/cuda_v13"
+          # Linux puts the binary in bin/ollama, darwin at the archive root.
+          for p in bin/ollama ollama; do
+            if [ -x "{{ .OLLAMA_DIST }}/$p" ]; then
+              ln -sf "ollama-{{ .OLLAMA_VERSION }}-dist/$p" "{{ .OLLAMA_BIN }}"
+              exit 0
+            fi
+          done
+          echo "ollama binary not found in extracted archive" >&2 && exit 1
+
+  deps:golangci-lint:
+    desc: Install golangci-lint
+    internal: true
+    deps:
+      - deps:bin-dir
+    cmds:
+      - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b {{.BIN_DIR}} v{{.GOLANGCI_LINT_VERSION}}
+      - mv {{.BIN_DIR}}/golangci-lint {{.GOLANGCI_LINT_BIN}}
+      - chmod +x {{.GOLANGCI_LINT_BIN}}
+    status:
+      - test -x {{.GOLANGCI_LINT_BIN}}
 
   clean:
     desc: Clean build artifacts
