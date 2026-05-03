@@ -12,16 +12,18 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// importTimeout is the wall-clock budget for a single MCP file import (one record).
-// LLM calls dominate this — qwen3:8b on CPU can take 30-60s per chat turn, and the
-// enricher does up to MaxSteps turns per record.
-const importTimeout = 5 * time.Minute
+// importTimeout is the wall-clock budget for a single Importer.Run. With
+// Azure OpenAI doing the inference, each record finishes in well under a
+// minute; the per-record cap (enricher.enrichmentTimeout) is still the
+// authoritative limit, this exists just so a hung spec doesn't block the
+// suite forever.
+const importTimeout = 10 * time.Minute
 
 var harness *integration.Harness
 
 func TestIntegration(t *testing.T) {
 	if testing.Short() {
-		t.Skip("integration suite needs Docker + a ~5GB Ollama model; skipped under -short")
+		t.Skip("integration suite needs Docker and Azure OpenAI credentials; skipped under -short")
 	}
 
 	RegisterFailHandler(Fail)

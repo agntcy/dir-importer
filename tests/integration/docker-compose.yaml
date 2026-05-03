@@ -6,10 +6,18 @@ name: dir-importer-integration
 services:
   apiserver:
     image: ghcr.io/agntcy/dir-apiserver:v1.2.0
+    # Mirrors agntcy/dir's reference docker-compose: postgres/postgres/directory
+    # against the postgres image's own defaults. Required since dir v1.2.0:
+    # the apiserver refuses to start without an OASF validator schema URL,
+    # and the helm chart points at the public Cisco-hosted schema server.
     environment:
       DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: zot:5000
       DIRECTORY_SERVER_DATABASE_TYPE: postgres
       DIRECTORY_SERVER_DATABASE_POSTGRES_HOST: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_DATABASE: directory
+      DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: postgres
+      DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL: https://schema.oasf.outshift.com
     ports:
       - "8888:8888"
     depends_on:
@@ -17,8 +25,11 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    # Distroless image has no shell, so use the exec form (JSON array) to bypass
+    # Docker's default `sh -c` wrapper. The non-zero exit of grpc-health-probe
+    # already signals "unhealthy" -- no need for `|| exit 1`.
     healthcheck:
-      test: grpc-health-probe -addr=127.0.0.1:8888 || exit 1
+      test: ["CMD", "grpc-health-probe", "-addr=127.0.0.1:8888"]
       interval: 5s
       retries: 60
       start_period: 30s
@@ -29,6 +40,7 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: directory
     healthcheck:

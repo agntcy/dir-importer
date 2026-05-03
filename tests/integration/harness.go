@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package integration exposes a shared dir client to every spec in this
-// directory. All process lifecycle (docker compose, Ollama daemon, Ollama
-// model) is owned by the `test:integration` Taskfile target; the test binary
-// only runs once the stack is healthy and the model is on disk.
+// directory. The docker compose stack is owned by the `test:integration`
+// Taskfile target; the test binary runs once the stack is healthy and the
+// caller's environment carries Azure OpenAI credentials.
 package integration
 
 import (
@@ -54,6 +54,18 @@ func bootstrap() (*Harness, error) {
 		return nil, fmt.Errorf("getwd: %w", err)
 	}
 
+	// `go test ./tests/integration/...` runs with the package directory as
+	// CWD, so the canonical enricher config sits two levels up. Resolve to an
+	// absolute path so failures point at the actual file on disk.
+	enricherCfg, err := filepath.Abs(filepath.Join(wd, "..", "..", "enricher", "enricher.json"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve enricher config path: %w", err)
+	}
+
+	if _, err := os.Stat(enricherCfg); err != nil {
+		return nil, fmt.Errorf("enricher config %q not accessible: %w", enricherCfg, err)
+	}
+
 	cli, err := importerclient.New(
 		context.Background(),
 		importerclient.WithConfig(&importerclient.Config{ServerAddress: apiserverAddr}),
@@ -63,7 +75,7 @@ func bootstrap() (*Harness, error) {
 	}
 
 	return &Harness{
-		enricherCfg: filepath.Join(wd, "enricher.json"),
+		enricherCfg: enricherCfg,
 		dirClient:   cli,
 	}, nil
 }

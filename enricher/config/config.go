@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Default values for enricher configuration.
@@ -72,6 +73,14 @@ func (c *Config) Validate() error {
 
 	if c.RequestsPerMinute <= 0 {
 		return errors.New("requests per minute must be greater than 0")
+	}
+
+	if strings.TrimSpace(c.SkillsPromptTemplate) == "" {
+		return errors.New("skills prompt template is empty after validation")
+	}
+
+	if strings.TrimSpace(c.DomainsPromptTemplate) == "" {
+		return errors.New("domains prompt template is empty after validation")
 	}
 
 	return nil

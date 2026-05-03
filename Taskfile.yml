@@ -7,12 +7,6 @@ vars:
   BIN_DIR: "{{ .ROOT_DIR }}/.bin"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
-  OLLAMA_VERSION: "0.22.1"
-  OLLAMA_BIN: "{{ .BIN_DIR }}/ollama"
-  OLLAMA_MODEL: "qwen3:8b"
-  OLLAMA_HOST: "127.0.0.1:11434"
-  # PID file marks daemons we spawned ourselves; ollama:stop only kills those.
-  OLLAMA_PID_FILE: "{{ .BIN_DIR }}/ollama.pid"
   COMPOSE_FILE: "{{ .ROOT_DIR }}/tests/integration/docker-compose.yaml"
   COMPOSE_PROJECT: "dir-importer-integration"
   DIRCTL_VERSION: "1.2.0"
@@ -31,20 +25,19 @@ tasks:
       - go build ./...
 
   test:integration:
-    desc: Run live integration tests (requires Docker; first run pulls dir images and the qwen3:8b Ollama model)
+    desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
     deps:
-      - deps:ollama:bin
       - deps:dirctl
-    # Defers fire LIFO (Go-style); register each teardown right after the
-    # matching setup so cleanup mirrors the reverse setup order even on test
-    # failure. `--wait` blocks until every healthcheck is green.
+    requires:
+      vars:
+        - AZURE_OPENAI_API_KEY
+        - AZURE_OPENAI_BASE_URL
+        - AZURE_OPENAI_DEPLOYMENT
+        - AZURE_OPENAI_API_VERSION
     cmds:
       - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - task: ollama:start
-      - defer: { task: ollama:stop }
-      - task: ollama:pull-model
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -timeout=50m -count=1 -v ./tests/integration/...
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -timeout=30m -count=1 -v ./tests/integration/...
 
   lint:
     desc: Run golangci-lint
@@ -126,132 +119,6 @@ tasks:
           echo "Installing ${asset} v{{ .DIRCTL_VERSION }} into {{ .BIN_DIR }}..."
           curl -sSfL "https://github.com/agntcy/dir/releases/download/v{{ .DIRCTL_VERSION }}/${asset}" -o "{{ .DIRCTL_BIN }}"
           chmod +x "{{ .DIRCTL_BIN }}"
-
-  deps:ollama:bin:
-    desc: Install the Ollama binary (with its runtime libs) into BIN_DIR
-    internal: true
-    deps:
-      - deps:bin-dir
-    vars:
-      OLLAMA_DIST: "{{ .BIN_DIR }}/ollama-{{ .OLLAMA_VERSION }}-dist"
-    status:
-      - test -x {{ .OLLAMA_BIN }}
-    cmds:
-      - cmd: |
-          set -e
-          base="https://github.com/ollama/ollama/releases/download/v{{ .OLLAMA_VERSION }}"
-          rm -rf "{{ .OLLAMA_DIST }}" && mkdir -p "{{ .OLLAMA_DIST }}"
-          case "$(uname -s)-$(uname -m)" in
-            Darwin-*)            curl -sSfL "$base/ollama-darwin.tgz" | tar -xz -C "{{ .OLLAMA_DIST }}" ;;
-            Linux-x86_64|Linux-amd64) curl -sSfL "$base/ollama-linux-amd64.tar.zst" | zstd -d | tar -x -C "{{ .OLLAMA_DIST }}" ;;
-            *) echo "unsupported platform; install ollama manually and set OLLAMA_BIN" >&2; exit 1 ;;
-          esac
-          # Linux drops CUDA libs we never use on a CI runner; safe to no-op on darwin.
-          rm -rf "{{ .OLLAMA_DIST }}/lib/ollama/cuda_v12" "{{ .OLLAMA_DIST }}/lib/ollama/cuda_v13"
-          # Linux puts the binary in bin/ollama, darwin at the archive root.
-          for p in bin/ollama ollama; do
-            if [ -x "{{ .OLLAMA_DIST }}/$p" ]; then
-              ln -sf "ollama-{{ .OLLAMA_VERSION }}-dist/$p" "{{ .OLLAMA_BIN }}"
-              exit 0
-            fi
-          done
-          echo "ollama binary not found in extracted archive" >&2 && exit 1
-
-  ollama:start:
-    desc: Ensure an Ollama daemon is reachable at OLLAMA_HOST; spawn one in the background if needed
-    deps:
-      - deps:ollama:bin
-    cmds:
-      - cmd: |
-          set -e
-          host="{{ .OLLAMA_HOST }}"
-
-          # /api/tags is the cheapest endpoint that confirms the daemon is fully up.
-          # curl works in any POSIX shell (Task's default gosh lacks bash's /dev/tcp).
-          probe_daemon() {
-            curl -fsS --max-time 1 -o /dev/null "http://${host}/api/tags"
-          }
-
-          if probe_daemon; then
-            # Don't write a PID file: ollama:stop only kills daemons we started ourselves.
-            echo "ollama:start: daemon already running at ${host}, leaving it alone"
-            exit 0
-          fi
-
-          log="{{ .BIN_DIR }}/ollama.log"
-          echo "ollama:start: spawning daemon (logs: ${log})"
-          # Spawn via `sh -c` so we get a real numeric PID. Task's default shell
-          # (gosh/mksh) prints job-ids like "g1" for $! after a background `&`,
-          # which would make ollama:stop unable to find the process from a fresh
-          # shell. nohup keeps the daemon alive after Task exits.
-          daemon_pid=$(sh -c 'OLLAMA_HOST="$1" nohup "$2" serve >"$3" 2>&1 & echo $!' \
-            _ "$host" "{{ .OLLAMA_BIN }}" "$log")
-          echo "$daemon_pid" > "{{ .OLLAMA_PID_FILE }}"
-
-          for _ in $(seq 1 60); do
-            sleep 0.5
-            if probe_daemon; then
-              echo "ollama:start: daemon ready (pid=${daemon_pid})"
-              exit 0
-            fi
-          done
-
-          echo "ollama:start: daemon did not become ready within 30s; dumping log:" >&2
-          tail -n 50 "$log" >&2 || true
-          kill "$daemon_pid" 2>/dev/null || true
-          rm -f "{{ .OLLAMA_PID_FILE }}"
-          exit 1
-
-  ollama:pull-model:
-    desc: Pull OLLAMA_MODEL via the running daemon (no-op if the model manifest is already on disk)
-    deps:
-      - deps:ollama:bin
-    vars:
-      # Honour $OLLAMA_MODELS if the user redirected the model store.
-      OLLAMA_MODELS_DIR:
-        sh: 'echo "${OLLAMA_MODELS:-$HOME/.ollama/models}"'
-      MODEL_REPO:
-        sh: 'echo "{{ .OLLAMA_MODEL }}" | cut -d":" -f1'
-      MODEL_TAG:
-        sh: 'echo "{{ .OLLAMA_MODEL }}" | cut -d":" -f2'
-    # Manifest path layout is stable across recent ollama versions; if it ever
-    # moves, the pull command itself is idempotent so a false negative just
-    # re-runs `ollama pull` (cheap when the blobs are already on disk).
-    status:
-      - test -e "{{ .OLLAMA_MODELS_DIR }}/manifests/registry.ollama.ai/library/{{ .MODEL_REPO }}/{{ .MODEL_TAG }}"
-    cmds:
-      - OLLAMA_HOST="{{ .OLLAMA_HOST }}" "{{ .OLLAMA_BIN }}" pull "{{ .OLLAMA_MODEL }}"
-
-  ollama:stop:
-    desc: Stop the Ollama daemon if (and only if) we spawned it via ollama:start
-    cmds:
-      # Task's default shell (gosh) ships a `kill` builtin that lacks `-0`, so
-      # we route the entire script through /bin/sh where signal handling and
-      # `ps -p` behave the way the script expects.
-      - cmd: |
-          /bin/sh -eu << 'STOP_SCRIPT'
-          pid_file="{{ .OLLAMA_PID_FILE }}"
-          if [ ! -f "$pid_file" ]; then
-            # No PID file => either ollama:start reused an existing daemon, or
-            # the daemon was never started. Either way, nothing to clean up.
-            exit 0
-          fi
-          pid="$(cat "$pid_file")"
-          rm -f "$pid_file"
-          if [ -z "$pid" ] || ! ps -p "$pid" >/dev/null 2>&1; then
-            echo "ollama:stop: pid ${pid} already gone, nothing to do"
-            exit 0
-          fi
-          echo "ollama:stop: terminating daemon (pid=${pid})"
-          kill "$pid" 2>/dev/null || true
-          i=0
-          while [ "$i" -lt 20 ]; do
-            ps -p "$pid" >/dev/null 2>&1 || exit 0
-            sleep 0.25
-            i=$((i + 1))
-          done
-          kill -9 "$pid" 2>/dev/null || true
-          STOP_SCRIPT
 
   deps:golangci-lint:
     desc: Install golangci-lint

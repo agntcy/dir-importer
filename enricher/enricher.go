@@ -44,8 +44,14 @@ type EnrichedField struct {
 	Reasoning  string  `json:"reasoning"`
 }
 
-// New builds an Enricher from validated config.
+// New builds an Enricher from cfg. cfg.Validate() is invoked here so callers do
+// not have to remember to do it: validation populates the embedded default
+// prompt templates, and skipping it would silently send empty prompts to the LLM.
 func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("enricher config: %w", err)
+	}
+
 	th, err := toolhost.NewFromConfigFile(ctx, cfg.ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("enricher tool host: %w", err)
