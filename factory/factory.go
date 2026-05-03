@@ -41,6 +41,16 @@ func Register(importType config.ImportType, fn ImporterFunc) {
 	importers[importType] = fn
 }
 
+// Replace overwrites the ImporterFunc for the given import type. Unlike Register
+// it does not panic on duplicates and is intended for tests that inject a custom
+// importer (e.g. one wired with enricher.NewStaticEnricher to bypass the LLM).
+func Replace(importType config.ImportType, fn ImporterFunc) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	importers[importType] = fn
+}
+
 // Create creates a new Importer instance for the given client and configuration.
 func Create(ctx context.Context, client config.ClientInterface, cfg config.Config) (types.Importer, error) {
 	mu.RLock()
