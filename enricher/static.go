@@ -12,14 +12,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// StaticEnricher injects pre-defined OASF skills and domains into every record
-// without consulting an LLM. It exists so downstream consumers (e.g. the dir
-// repo's e2e suite) can exercise the importer pipeline end-to-end in CI without
-// provisioning model credentials.
+// StaticEnricher injects pre-defined OASF skills and domains into every record.
+// It is intended for testing environments where no LLM is available.
 type StaticEnricher struct{}
 
-// NewStaticEnricher returns a StaticEnricher that injects hardcoded
-// OASF-valid skills and domains into every record.
+// NewStaticEnricher creates a StaticEnricher that injects hardcoded OASF-valid skills and domains.
 func NewStaticEnricher() *StaticEnricher { return &StaticEnricher{} }
 
 var staticSkills = &structpb.ListValue{Values: []*structpb.Value{
@@ -36,8 +33,7 @@ var staticDomains = &structpb.ListValue{Values: []*structpb.Value{
 	}}),
 }}
 
-// Enrich reads records from inputCh, injects the static skills and domains,
-// and forwards them on the returned channel.
+// Enrich reads records from inputCh, injects the static skills and domains, and forwards them.
 func (se *StaticEnricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, result *types.Result) (<-chan *corev1.Record, <-chan error) {
 	outputCh := make(chan *corev1.Record)
 	errCh := make(chan error)

@@ -30,9 +30,8 @@ const (
 	ImportTypeAgentSkill ImportType = "agent-skill"
 )
 
-// ClientInterface is the subset of the DIR client surface that the importer pipeline
-// depends on. Defining it here (rather than referencing *client.Client directly) keeps
-// the importer's dependency on the DIR client's public surface explicit and minimal.
+// ClientInterface defines the interface for the DIR client used by importers.
+// This allows for easier testing and mocking.
 type ClientInterface interface {
 	Push(ctx context.Context, record *corev1.Record) (*corev1.RecordRef, error)
 	SearchCIDs(ctx context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error)
@@ -56,7 +55,7 @@ type Config struct {
 	Debug bool // If true, enable verbose debug output
 
 	Enricher         enricherconfig.Config // Configuration for the enricher pipeline stage
-	EnricherOverride types.Enricher        // When set, importer.New skips enricher initialization and uses this directly (test-only).
+	EnricherOverride types.Enricher        // When set, bypass enricher initialization and use this instead (test-only)
 	Scanner          scannerconfig.Config  // Configuration for the scanner pipeline stage
 }
 
