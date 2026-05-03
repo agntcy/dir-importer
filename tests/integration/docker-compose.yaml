@@ -1,0 +1,39 @@
+name: dir-importer-integration
+
+services:
+  apiserver:
+    image: ghcr.io/agntcy/dir-apiserver:v1.2.0
+    environment:
+      DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: zot:5000
+      DIRECTORY_SERVER_DATABASE_TYPE: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_HOST: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_DATABASE: directory
+      DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: postgres
+      DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL: https://schema.oasf.outshift.com
+    ports:
+      - "8888:8888"
+    depends_on:
+      zot:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "grpc-health-probe", "-addr=127.0.0.1:8888"]
+      interval: 5s
+      retries: 60
+      start_period: 30s
+
+  zot:
+    image: ghcr.io/project-zot/zot:v2.1.16
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: directory
+    healthcheck:
+      test: pg_isready -U postgres -d directory
+      interval: 5s
+      retries: 30

@@ -4,9 +4,15 @@
 version: "3"
 
 vars:
-  BIN_DIR: '{{ .BIN_DIR | default "./.bin" }}'
+  BIN_DIR: "{{ .ROOT_DIR }}/.bin"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
+  COMPOSE_FILE: "{{ .ROOT_DIR }}/tests/integration/docker-compose.yaml"
+  COMPOSE_PROJECT: "dir-importer-integration"
+  DIRCTL_VERSION: "1.2.0"
+  DIRCTL_BIN: "{{ .BIN_DIR }}/dirctl"
+  GOLANGCI_LINT_VERSION: "2.12.1"
+  GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{.GOLANGCI_LINT_VERSION}}"
 
 tasks:
   default:
@@ -18,15 +24,21 @@ tasks:
     cmds:
       - go build ./...
 
-  test:
-    desc: Run unit tests
+  test:integration:
+    desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
+    deps:
+      - deps:dirctl
     cmds:
-      - go test -race -coverprofile=coverage.out ./...
+      - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
+      - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -timeout=30m -count=1 -v ./tests/integration/...
 
   lint:
     desc: Run golangci-lint
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run ./...
+      - "{{ .GOLANGCI_LINT_BIN }} run ./..."
 
   license:
     desc: Run license check
@@ -41,8 +53,10 @@ tasks:
 
   pre-commit:golangci-lint:
     desc: Run golangci-lint pre-commit hook
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run --fix {{.CLI_ARGS | default "./..."}}
+      - "{{ .GOLANGCI_LINT_BIN }} run --fix {{ .CLI_ARGS | default \"./...\" }}"
 
   deps:
     desc: Install development dependencies and git hooks
@@ -79,6 +93,38 @@ tasks:
     cmds:
       - echo "Installing mcp-scanner"
       - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
+
+  deps:dirctl:
+    desc: Ensure `dirctl` is available; download it into BIN_DIR only when missing
+    deps:
+      - deps:bin-dir
+    status:
+      - test -x {{ .DIRCTL_BIN }}
+    cmds:
+      - cmd: |
+          set -e
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) arch="amd64" ;;
+            aarch64) arch="arm64" ;;
+          esac
+          asset="dirctl-${os}-${arch}"
+          echo "Installing ${asset} v{{ .DIRCTL_VERSION }} into {{ .BIN_DIR }}..."
+          curl -sSfL "https://github.com/agntcy/dir/releases/download/v{{ .DIRCTL_VERSION }}/${asset}" -o "{{ .DIRCTL_BIN }}"
+          chmod +x "{{ .DIRCTL_BIN }}"
+
+  deps:golangci-lint:
+    desc: Install golangci-lint
+    internal: true
+    deps:
+      - deps:bin-dir
+    cmds:
+      - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b {{.BIN_DIR}} v{{.GOLANGCI_LINT_VERSION}}
+      - mv {{.BIN_DIR}}/golangci-lint {{.GOLANGCI_LINT_BIN}}
+      - chmod +x {{.GOLANGCI_LINT_BIN}}
+    status:
+      - test -x {{.GOLANGCI_LINT_BIN}}
 
   clean:
     desc: Clean build artifacts
