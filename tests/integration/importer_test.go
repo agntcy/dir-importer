@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Specs in this file exercise the importer library against real downstream
-// services (DIR apiserver + zot + postgres + Ollama + dirctl mcp serve). Run
-// the suite via `task test:integration`, which manages the whole stack.
+// services (DIR apiserver + zot + postgres + Azure OpenAI + dirctl mcp serve).
+// Run the suite via `task test:integration`, which manages the docker stack and
+// requires AZURE_OPENAI_* env vars to be exported.
 package integration_test
 
 import (
@@ -158,9 +159,13 @@ var _ = Describe("Importer", func() {
 
 	// DryRun writes records to a JSONL file and never pushes. ImportedCount stays at 0
 	// (DryRun never increments it) and the OutputFile must exist + be non-empty.
+	// Force=true bypasses dedup so this spec is order-independent: prior specs in the
+	// suite seed mcp_basic.json into the live apiserver, and without Force the dedup
+	// stage would silently filter the only record before it reaches the file writer.
 	It("writes records to a JSONL file and skips push on DryRun", func() {
 		cfg := mcpConfig(fixturePath("mcp_basic.json"))
 		cfg.DryRun = true
+		cfg.Force = true
 
 		ctx, cancel := context.WithTimeout(context.Background(), importTimeout)
 		defer cancel()
