@@ -10,6 +10,7 @@ import (
 
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
+	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	searchv1 "github.com/agntcy/dir/api/search/v1"
 	"github.com/agntcy/dir/client/streaming"
@@ -54,8 +55,9 @@ type Config struct {
 	Force bool // If true, push even if record already exists
 	Debug bool // If true, enable verbose debug output
 
-	Enricher enricherconfig.Config // Configuration for the enricher pipeline stage
-	Scanner  scannerconfig.Config  // Configuration for the scanner pipeline stage
+	Enricher         enricherconfig.Config // Configuration for the enricher pipeline stage
+	EnricherOverride types.Enricher        // When set, importer.New skips enricher initialization and uses this directly (test-only).
+	Scanner          scannerconfig.Config  // Configuration for the scanner pipeline stage
 }
 
 // Validate checks if the configuration is valid.
@@ -77,8 +79,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported import type: %s", c.Type)
 	}
 
-	if err := c.Enricher.Validate(); err != nil {
-		return fmt.Errorf("enricher configuration is invalid: %w", err)
+	if c.EnricherOverride == nil {
+		if err := c.Enricher.Validate(); err != nil {
+			return fmt.Errorf("enricher configuration is invalid: %w", err)
+		}
 	}
 
 	if err := c.Scanner.Validate(); err != nil {
