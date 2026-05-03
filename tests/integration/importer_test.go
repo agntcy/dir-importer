@@ -1,16 +1,9 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-// Specs in this file exercise the importer library against real downstream services
-// (DIR apiserver + zot + postgres + Ollama + dirctl mcp serve).
-//
-// Run locally:
-//
-//	go test -count=1 ./tests/integration/...
-//
-// Or via Taskfile:
-//
-//	task test:integration
+// Specs in this file exercise the importer library against real downstream
+// services (DIR apiserver + zot + postgres + Ollama + dirctl mcp serve). Run
+// the suite via `task test:integration`, which manages the whole stack.
 package integration_test
 
 import (
