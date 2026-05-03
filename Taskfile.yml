@@ -28,12 +28,6 @@ tasks:
     desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
     deps:
       - deps:dirctl
-    requires:
-      vars:
-        - AZURE_OPENAI_API_KEY
-        - AZURE_OPENAI_BASE_URL
-        - AZURE_OPENAI_DEPLOYMENT
-        - AZURE_OPENAI_API_VERSION
     cmds:
       - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans

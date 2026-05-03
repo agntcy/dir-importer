@@ -1,15 +1,8 @@
-# Stack used by integration tests. All dir-* images pinned to v1.2.0 to match
-# github.com/agntcy/dir/{api,client,utils} in this repo's go.mod.
-
 name: dir-importer-integration
 
 services:
   apiserver:
     image: ghcr.io/agntcy/dir-apiserver:v1.2.0
-    # Mirrors agntcy/dir's reference docker-compose: postgres/postgres/directory
-    # against the postgres image's own defaults. Required since dir v1.2.0:
-    # the apiserver refuses to start without an OASF validator schema URL,
-    # and the helm chart points at the public Cisco-hosted schema server.
     environment:
       DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: zot:5000
       DIRECTORY_SERVER_DATABASE_TYPE: postgres
@@ -25,9 +18,6 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-    # Distroless image has no shell, so use the exec form (JSON array) to bypass
-    # Docker's default `sh -c` wrapper. The non-zero exit of grpc-health-probe
-    # already signals "unhealthy" -- no need for `|| exit 1`.
     healthcheck:
       test: ["CMD", "grpc-health-probe", "-addr=127.0.0.1:8888"]
       interval: 5s

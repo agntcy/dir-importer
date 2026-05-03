@@ -1,10 +1,6 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-// Package integration exposes a shared dir client to every spec in this
-// directory. The docker compose stack is owned by the `test:integration`
-// Taskfile target; the test binary runs once the stack is healthy and the
-// caller's environment carries Azure OpenAI credentials.
 package integration
 
 import (
@@ -54,9 +50,6 @@ func bootstrap() (*Harness, error) {
 		return nil, fmt.Errorf("getwd: %w", err)
 	}
 
-	// `go test ./tests/integration/...` runs with the package directory as
-	// CWD, so the canonical enricher config sits two levels up. Resolve to an
-	// absolute path so failures point at the actual file on disk.
 	enricherCfg, err := filepath.Abs(filepath.Join(wd, "..", "..", "enricher", "enricher.json"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve enricher config path: %w", err)
