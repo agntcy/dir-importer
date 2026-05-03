@@ -34,7 +34,3 @@ var _ = BeforeSuite(func() {
 
 	harness = h
 })
-
-var _ = AfterSuite(func() {
-	integration.Shutdown()
-})
