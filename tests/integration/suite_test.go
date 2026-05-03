@@ -12,11 +12,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// importTimeout is the wall-clock budget for a single Importer.Run. With
-// Azure OpenAI doing the inference, each record finishes in well under a
-// minute; the per-record cap (enricher.enrichmentTimeout) is still the
-// authoritative limit, this exists just so a hung spec doesn't block the
-// suite forever.
 const importTimeout = 10 * time.Minute
 
 var harness *integration.Harness

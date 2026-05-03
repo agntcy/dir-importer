@@ -1,10 +1,6 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-// Specs in this file exercise the importer library against real downstream
-// services (DIR apiserver + zot + postgres + Azure OpenAI + dirctl mcp serve).
-// Run the suite via `task test:integration`, which manages the docker stack and
-// requires AZURE_OPENAI_* env vars to be exported.
 package integration_test
 
 import (
@@ -22,9 +18,6 @@ import (
 )
 
 var _ = Describe("Importer", func() {
-	// newConfig assembles a full importer config for the given import type and source path.
-	// Each spec gets a fresh Config so they can mutate Force/DryRun/etc. without bleeding
-	// into neighbours.
 	newConfig := func(importType config.ImportType, source string) config.Config {
 		return config.Config{
 			Type:     importType,
@@ -48,7 +41,6 @@ var _ = Describe("Importer", func() {
 		return filepath.Join(wd, "testdata", name)
 	}
 
-	// Smoke test for the full pipeline. One well-formed MCP server -> one CID in DIR.
 	It("imports a single well-formed MCP record end-to-end", func() {
 		cfg := mcpConfig(fixturePath("mcp_basic.json"))
 
@@ -66,9 +58,6 @@ var _ = Describe("Importer", func() {
 		Expect(res.ImportedCIDs[0]).NotTo(BeEmpty())
 	})
 
-	// Re-import: dedup must filter previously-pushed records on the second run. This
-	// exercises the SearchCIDs + PullBatch path in dedup.go against the live
-	// postgres-backed search index.
 	It("filters duplicates on re-import via the dedup stage", func() {
 		fixture := fixturePath("mcp_pair.json")
 
@@ -102,8 +91,6 @@ var _ = Describe("Importer", func() {
 		Expect(res.SkippedCount).To(Equal(2))
 	})
 
-	// cfg.Force=true bypasses the dedup stage. The DIR server is content-addressable, so
-	// re-pushing returns the same CID without erroring.
 	It("re-pushes records when Force=true bypasses dedup", func() {
 		fixture := fixturePath("mcp_basic.json")
 
@@ -136,9 +123,6 @@ var _ = Describe("Importer", func() {
 		Expect(res.SkippedCount).To(BeZero(), "Force should bypass dedup, no skips expected")
 	})
 
-	// Regression test for the historical "first error returns from goroutine" class of
-	// bugs across pipeline stages. With one invalid record next to one valid record, the
-	// pipeline must continue and import the valid one.
 	It("does not abort the run when a single record fails to transform", func() {
 		fixture := writeMixedFixture()
 
@@ -157,11 +141,6 @@ var _ = Describe("Importer", func() {
 			To(BeTrue(), "expected a transform error mentioning 'no packages or remotes', got: %v", res.Errors)
 	})
 
-	// DryRun writes records to a JSONL file and never pushes. ImportedCount stays at 0
-	// (DryRun never increments it) and the OutputFile must exist + be non-empty.
-	// Force=true bypasses dedup so this spec is order-independent: prior specs in the
-	// suite seed mcp_basic.json into the live apiserver, and without Force the dedup
-	// stage would silently filter the only record before it reaches the file writer.
 	It("writes records to a JSONL file and skips push on DryRun", func() {
 		cfg := mcpConfig(fixturePath("mcp_basic.json"))
 		cfg.DryRun = true
@@ -188,8 +167,6 @@ var _ = Describe("Importer", func() {
 		Expect(info.Size()).NotTo(BeZero(), "DryRun output file is empty")
 	})
 
-	// Single A2A AgentCard end-to-end. Exercises the a2a fetcher + transformer's A2AToRecord
-	// path against the live OASF translator.
 	It("imports a single A2A AgentCard end-to-end", func() {
 		cfg := newConfig(config.ImportTypeA2A, fixturePath("a2a_basic.json"))
 
@@ -207,8 +184,6 @@ var _ = Describe("Importer", func() {
 		Expect(res.ImportedCIDs[0]).NotTo(BeEmpty())
 	})
 
-	// Agent Skill directory end-to-end. Exercises skill.ParseSkillDirectory and the
-	// transformer's SkillMarkdownToRecord path. The fixture is a directory, not a file.
 	It("imports an Agent Skill directory end-to-end", func() {
 		cfg := newConfig(config.ImportTypeAgentSkill, fixturePath("agent_skill_hello"))
 
@@ -227,8 +202,6 @@ var _ = Describe("Importer", func() {
 	})
 })
 
-// writeMixedFixture composes a fixture with one invalid + one valid record on the fly.
-// Done in the spec rather than as a static file so the test stays self-documenting.
 func writeMixedFixture() string {
 	GinkgoHelper()
 
