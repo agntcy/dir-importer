@@ -41,8 +41,8 @@
       "description": ["Group Go dependency patch updates in single PR."]
     },
     {
-      "groupName": "AGNTCY dir dependencies",
-      "groupSlug": "agntcy-dir",
+      "groupName": "DIR feature dependencies",
+      "groupSlug": "dir-feat-deps",
       "matchDatasources": ["go"],
       "matchPackageNames": [
         "github.com/agntcy/dir/api",
