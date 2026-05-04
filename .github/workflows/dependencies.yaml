@@ -1,0 +1,47 @@
+# Copyright AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Dependencies
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  renovate:
+    name: Renovate Sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate with GitHub App Bot
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ secrets.PROJECT_APP_ID }}
+          private-key: ${{ secrets.PROJECT_APP_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.head_ref }}
+          # Make sure the value of GITHUB_TOKEN will not be persisted in repo's config.
+          persist-credentials: false
+
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@f66d8679fcfcfa051abde6e7a623007173bf5164 # v46.1.12
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+        env:
+          ## Discovery
+          RENOVATE_AUTODISCOVER: "true"
+          RENOVATE_AUTODISCOVER_FILTER: "${{ github.repository }}"
+          ## Project sync
+          RENOVATE_PLATFORM: "github"
+          RENOVATE_PLATFORM_COMMIT: "enabled"
+          GITHUB_COM_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Remove unused fields from PR description.
+          RENOVATE_PR_BODY_TEMPLATE: "{{{header}}}{{{table}}}{{{warnings}}}{{{notes}}}{{{changelogs}}}"
+          RENOVATE_DEPENDENCY_DASHBOARD_HEADER: ""
+          RENOVATE_DEPENDENCY_DASHBOARD_O_S_V_VULNERABILITY_SUMMARY: "all"

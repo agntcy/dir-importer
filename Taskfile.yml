@@ -5,6 +5,8 @@ version: "3"
 
 vars:
   BIN_DIR: '{{ .BIN_DIR | default "./.bin" }}'
+  GOLANGCI_LINT_VERSION: "2.11.3"
+  GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
 
@@ -25,8 +27,10 @@ tasks:
 
   lint:
     desc: Run golangci-lint
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run ./...
+      - "{{ .GOLANGCI_LINT_BIN }} run ./..."
 
   license:
     desc: Run license check
@@ -71,6 +75,18 @@ tasks:
       - rm -f {{ .BIN_DIR }}/uvx
     status:
       - test -x {{ .UV_BIN }}
+
+  deps:golangci-lint:
+    desc: Install golangci-lint
+    internal: true
+    deps:
+      - deps:bin-dir
+    cmds:
+      - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b {{ .BIN_DIR }} v{{ .GOLANGCI_LINT_VERSION }}
+      - mv {{ .BIN_DIR }}/golangci-lint {{ .GOLANGCI_LINT_BIN }}
+      - chmod +x {{ .GOLANGCI_LINT_BIN }}
+    status:
+      - test -x {{ .GOLANGCI_LINT_BIN }}
 
   deps:mcp-scanner:
     desc: Install mcp-scanner CLI via uv
