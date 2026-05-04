@@ -41,6 +41,22 @@
       "description": ["Group Go dependency patch updates in single PR."]
     },
     {
+      "groupName": "AGNTCY dir dependencies",
+      "groupSlug": "agntcy-dir",
+      "matchDatasources": ["go"],
+      "matchPackageNames": [
+        "github.com/agntcy/dir/api",
+        "github.com/agntcy/dir/client",
+        "github.com/agntcy/dir/utils"
+      ],
+      "addLabels": ["agntcy", "release"],
+      "automerge": false,
+      "description": [
+        "Group Directory modules consumed by dir-importer.",
+        "These dependencies should be reviewed as part of the Directory release train."
+      ]
+    },
+    {
       "groupName": "Github Actions",
       "groupSlug": "github-actions",
       "matchDatasources": ["github-tags"],
