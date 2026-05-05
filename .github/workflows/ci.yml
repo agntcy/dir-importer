@@ -154,7 +154,15 @@ jobs:
           AZURE_OPENAI_BASE_URL: ${{ secrets.AZURE_OPENAI_BASE_URL }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-        run: task test:integration
+        run: task test:integration:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
+        with:
+          files: coverage-integration.out
+          flags: integration
+          codecov_yml_path: codecov.yml
+          use_oidc: true
 
   success:
     name: Success

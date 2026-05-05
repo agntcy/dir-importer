@@ -49,6 +49,15 @@ tasks:
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
       - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=integration -timeout=30m -count=1 -v ./tests/integration/...
 
+  test:integration:coverage:
+    desc: Run integration tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
+    deps:
+      - deps:dirctl
+    cmds:
+      - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
+      - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=integration -timeout=30m -count=1 -v -coverpkg=./... -coverprofile=coverage-integration.out ./tests/integration/...
+
   lint:
     desc: Run golangci-lint
     deps:
@@ -145,4 +154,4 @@ tasks:
   clean:
     desc: Clean build artifacts
     cmds:
-      - rm -rf {{ .BIN_DIR }} coverage.out
+      - rm -rf {{ .BIN_DIR }} coverage.out coverage-integration.out
