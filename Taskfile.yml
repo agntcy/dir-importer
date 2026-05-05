@@ -26,6 +26,11 @@ tasks:
     cmds:
       - go build ./...
 
+  test:unit:
+    desc: Run fast, hermetic unit tests (no Docker, no LLM, no network)
+    cmds:
+      - go test -race -count=1 ./...
+
   test:integration:
     desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
     deps:
@@ -33,7 +38,7 @@ tasks:
     cmds:
       - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -timeout=30m -count=1 -v ./tests/integration/...
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=integration -timeout=30m -count=1 -v ./tests/integration/...
 
   lint:
     desc: Run golangci-lint
