@@ -32,12 +32,6 @@ tasks:
   test:unit:coverage:
     desc: Run unit tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
     cmds:
-      # -coverprofile=coverage.out is what the Codecov action uploads in CI.
-      # Kept in its own target because some local Go toolchain installs (notably
-      # the auto-downloaded toolchain when go.mod pins a non-stable go version)
-      # are missing the covdata helper, which makes plain `task test:unit` fail
-      # for contributors. CI uses actions/setup-go, which always ships a
-      # complete toolchain.
       - go test -race -count=1 -coverprofile=coverage.out ./...
 
   test:integration:
