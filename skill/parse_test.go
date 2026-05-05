@@ -22,7 +22,7 @@ const (
 
 // splitSkillFrontmatter is the YAML frontmatter splitter for SKILL.md. It is
 // the kernel of the SKILL.md parser, with several tricky edge cases (BOM, CRLF,
-// missing closing delimiter, empty body) that the integration suite cannot
+// missing closing delimiter, empty body) that the e2e suite cannot
 // enumerate cheaply.
 func TestSplitSkillFrontmatter(t *testing.T) {
 	t.Parallel()

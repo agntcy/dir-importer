@@ -1,6 +1,6 @@
 {
-  "name": "com.agntcy.integration-test/support-agent",
-  "description": "Integration test fixture: minimal valid A2A AgentCard with one skill and one interface.",
+  "name": "com.agntcy.e2e-test/support-agent",
+  "description": "E2E test fixture: minimal valid A2A AgentCard with one skill and one interface.",
   "version": "1.0.0",
   "documentationUrl": "https://example.invalid/agents/support-agent",
   "capabilities": {
@@ -19,7 +19,7 @@
     }
   ],
   "provider": {
-    "organization": "AGNTCY Integration Tests",
+    "organization": "AGNTCY E2E Tests",
     "url": "https://example.invalid"
   },
   "supportedInterfaces": [

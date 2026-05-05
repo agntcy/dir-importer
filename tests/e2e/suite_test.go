@@ -1,30 +1,30 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build integration
+//go:build e2e
 
-package integration_test
+package e2e_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/agntcy/dir-importer/tests/integration"
+	"github.com/agntcy/dir-importer/tests/e2e"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 const importTimeout = 10 * time.Minute
 
-var harness *integration.Harness
+var harness *e2e.Harness
 
-func TestIntegration(t *testing.T) {
+func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Importer Integration Suite")
+	RunSpecs(t, "Importer E2E Suite")
 }
 
 var _ = BeforeSuite(func() {
-	h, err := integration.Setup()
+	h, err := e2e.Setup()
 	Expect(err).NotTo(HaveOccurred(), "harness bootstrap failed")
 
 	harness = h

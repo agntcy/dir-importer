@@ -9,8 +9,8 @@ vars:
   GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
-  COMPOSE_FILE: "{{ .ROOT_DIR }}/tests/integration/docker-compose.yaml"
-  COMPOSE_PROJECT: "dir-importer-integration"
+  COMPOSE_FILE: "{{ .ROOT_DIR }}/tests/e2e/docker-compose.yaml"
+  COMPOSE_PROJECT: "dir-importer-e2e"
   DIRCTL_VERSION: "1.2.0"
   DIRCTL_BIN: "{{ .BIN_DIR }}/dirctl"
 
@@ -34,23 +34,23 @@ tasks:
     cmds:
       - go test -race -count=1 -coverprofile=coverage.out ./...
 
-  test:integration:
-    desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
+  test:e2e:
+    desc: Run live end-to-end tests (requires Docker and Azure OpenAI credentials in the environment)
     deps:
       - deps:dirctl
     cmds:
       - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=integration -timeout=30m -count=1 -v ./tests/integration/...
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=e2e -timeout=30m -count=1 -v ./tests/e2e/...
 
-  test:integration:coverage:
-    desc: Run integration tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
+  test:e2e:coverage:
+    desc: Run e2e tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
     deps:
       - deps:dirctl
     cmds:
       - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
       - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=integration -timeout=30m -count=1 -v -coverpkg=./... -coverprofile=coverage-integration.out ./tests/integration/...
+      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=e2e -timeout=30m -count=1 -v -coverpkg=./... -coverprofile=coverage-e2e.out ./tests/e2e/...
 
   lint:
     desc: Run golangci-lint
@@ -148,4 +148,4 @@ tasks:
   clean:
     desc: Clean build artifacts
     cmds:
-      - rm -rf {{ .BIN_DIR }} coverage.out coverage-integration.out
+      - rm -rf {{ .BIN_DIR }} coverage.out coverage-e2e.out

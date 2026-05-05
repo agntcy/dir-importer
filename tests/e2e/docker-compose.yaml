@@ -1,4 +1,4 @@
-name: dir-importer-integration
+name: dir-importer-e2e
 
 services:
   apiserver:

@@ -1,9 +1,9 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build integration
+//go:build e2e
 
-package integration_test
+package e2e_test
 
 import (
 	"context"
@@ -211,7 +211,7 @@ func writeMixedFixture() string {
   {
     "server": {
       "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-      "name": "io.github.agntcy/integration-test-mixed-invalid",
+      "name": "io.github.agntcy/e2e-test-mixed-invalid",
       "description": "Has neither packages nor remotes; the transformer must reject this record.",
       "title": "Mixed Invalid",
       "version": "1.0.0"
@@ -220,7 +220,7 @@ func writeMixedFixture() string {
   {
     "server": {
       "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-      "name": "io.github.agntcy/integration-test-mixed-valid",
+      "name": "io.github.agntcy/e2e-test-mixed-valid",
       "description": "Valid record that must still be imported despite its sibling failing.",
       "title": "Mixed Valid",
       "version": "1.0.0",

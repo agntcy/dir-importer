@@ -123,8 +123,8 @@ jobs:
       - name: Build library
         run: task build
 
-  integration:
-    name: Integration Tests
+  e2e:
+    name: E2E Tests
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -148,19 +148,19 @@ jobs:
           os: linux
           arch: amd64
 
-      - name: Run integration tests
+      - name: Run e2e tests
         env:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_BASE_URL: ${{ secrets.AZURE_OPENAI_BASE_URL }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-        run: task test:integration:coverage
+        run: task test:e2e:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
         with:
-          files: coverage-integration.out
-          flags: integration
+          files: coverage-e2e.out
+          flags: e2e
           codecov_yml_path: codecov.yml
           use_oidc: true
 
@@ -172,7 +172,7 @@ jobs:
       - license
       - unit
       - build
-      - integration
+      - e2e
     runs-on: ubuntu-latest
     steps:
       - name: Echo Success

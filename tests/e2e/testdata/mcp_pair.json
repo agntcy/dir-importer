@@ -2,9 +2,9 @@
   {
     "server": {
       "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-      "name": "io.github.agntcy/integration-test-pair-a",
-      "description": "Integration test fixture A: first server in a two-record import.",
-      "title": "Integration Test Pair A",
+      "name": "io.github.agntcy/e2e-test-pair-a",
+      "description": "E2E test fixture A: first server in a two-record import.",
+      "title": "E2E Test Pair A",
       "version": "1.0.0",
       "remotes": [{"type": "streamable-http", "url": "https://example.invalid/a"}]
     }
@@ -12,9 +12,9 @@
   {
     "server": {
       "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-      "name": "io.github.agntcy/integration-test-pair-b",
-      "description": "Integration test fixture B: second server in a two-record import.",
-      "title": "Integration Test Pair B",
+      "name": "io.github.agntcy/e2e-test-pair-b",
+      "description": "E2E test fixture B: second server in a two-record import.",
+      "title": "E2E Test Pair B",
       "version": "1.0.0",
       "remotes": [{"type": "streamable-http", "url": "https://example.invalid/b"}]
     }

@@ -1,9 +1,9 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build integration
+//go:build e2e
 
-package integration
+package e2e
 
 import (
 	"context"
