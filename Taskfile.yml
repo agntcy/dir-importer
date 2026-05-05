@@ -5,7 +5,7 @@ version: "3"
 
 vars:
   BIN_DIR: "{{ .ROOT_DIR }}/.bin"
-  GOLANGCI_LINT_VERSION: "2.11.3"
+  GOLANGCI_LINT_VERSION: "2.12.1"
   GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
@@ -13,8 +13,6 @@ vars:
   COMPOSE_PROJECT: "dir-importer-integration"
   DIRCTL_VERSION: "1.2.0"
   DIRCTL_BIN: "{{ .BIN_DIR }}/dirctl"
-  GOLANGCI_LINT_VERSION: "2.12.1"
-  GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{.GOLANGCI_LINT_VERSION}}"
 
 tasks:
   default:
@@ -30,6 +28,17 @@ tasks:
     desc: Run fast, hermetic unit tests (no Docker, no LLM, no network)
     cmds:
       - go test -race -count=1 ./...
+
+  test:unit:coverage:
+    desc: Run unit tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
+    cmds:
+      # -coverprofile=coverage.out is what the Codecov action uploads in CI.
+      # Kept in its own target because some local Go toolchain installs (notably
+      # the auto-downloaded toolchain when go.mod pins a non-stable go version)
+      # are missing the covdata helper, which makes plain `task test:unit` fail
+      # for contributors. CI uses actions/setup-go, which always ships a
+      # complete toolchain.
+      - go test -race -count=1 -coverprofile=coverage.out ./...
 
   test:integration:
     desc: Run live integration tests (requires Docker and Azure OpenAI credentials in the environment)
@@ -132,18 +141,6 @@ tasks:
           echo "Installing ${asset} v{{ .DIRCTL_VERSION }} into {{ .BIN_DIR }}..."
           curl -sSfL "https://github.com/agntcy/dir/releases/download/v{{ .DIRCTL_VERSION }}/${asset}" -o "{{ .DIRCTL_BIN }}"
           chmod +x "{{ .DIRCTL_BIN }}"
-
-  deps:golangci-lint:
-    desc: Install golangci-lint
-    internal: true
-    deps:
-      - deps:bin-dir
-    cmds:
-      - curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b {{.BIN_DIR}} v{{.GOLANGCI_LINT_VERSION}}
-      - mv {{.BIN_DIR}}/golangci-lint {{.GOLANGCI_LINT_BIN}}
-      - chmod +x {{.GOLANGCI_LINT_BIN}}
-    status:
-      - test -x {{.GOLANGCI_LINT_BIN}}
 
   clean:
     desc: Clean build artifacts
