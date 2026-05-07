@@ -19,15 +19,24 @@ import (
 
 var dedupLogger = logging.Logger("importer/pipeline/dedup")
 
+// OASF module names recognised by the deduplication cache. MCP and A2A include
+// the legacy runtime/* names so that records imported under the old module
+// name are also detected as duplicates.
+const (
+	moduleMCPCurrent     = "integration/mcp"
+	moduleMCPLegacy      = "runtime/mcp"
+	moduleA2ACurrent     = "integration/a2a"
+	moduleA2ALegacy      = "runtime/a2a"
+	moduleAgentSkillName = "core/language_model/agentskills"
+)
+
 // modulesByImportType maps each import type to the module names that should be
-// queried when building the deduplication cache. MCP registry and MCP file both
-// include the legacy runtime/mcp name so that records imported under the old
-// module name are also detected as duplicates.
+// queried when building the deduplication cache.
 var modulesByImportType = map[config.ImportType][]string{
-	config.ImportTypeMCPRegistry: {"integration/mcp", "runtime/mcp"},
-	config.ImportTypeMCP:         {"integration/mcp", "runtime/mcp"},
-	config.ImportTypeA2A:         {"integration/a2a", "runtime/a2a"},
-	config.ImportTypeAgentSkill:  {"core/language_model/agentskills"},
+	config.ImportTypeMCPRegistry: {moduleMCPCurrent, moduleMCPLegacy},
+	config.ImportTypeMCP:         {moduleMCPCurrent, moduleMCPLegacy},
+	config.ImportTypeA2A:         {moduleA2ACurrent, moduleA2ALegacy},
+	config.ImportTypeAgentSkill:  {moduleAgentSkillName},
 }
 
 // DuplicateChecker checks for duplicate records by comparing name@version

@@ -1,37 +1,105 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-package config
+package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 )
 
-func TestConfig_Validate_DisabledNoop(t *testing.T) {
+const scannerBin = "mcp-scanner"
+
+func TestValidate(t *testing.T) {
 	t.Parallel()
 
-	c := Config{Enabled: false}
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+	tests := []struct {
+		name        string
+		cfg         scannerconfig.Config
+		wantErrText string // empty = expect success
+	}{
+		{
+			name: "disabled scanner ignores all other fields",
+			cfg:  scannerconfig.Config{Enabled: false},
+		},
+		{
+			name: "disabled scanner with junk fields still validates",
+			cfg: scannerconfig.Config{
+				Enabled: false,
+				Timeout: -42,
+				CLIPath: "",
+			},
+		},
+		{
+			name: "enabled with zero timeout is rejected",
+			cfg: scannerconfig.Config{
+				Enabled: true,
+				Timeout: 0,
+				CLIPath: scannerBin,
+			},
+			wantErrText: "timeout must be greater than 0",
+		},
+		{
+			name: "enabled with negative timeout is rejected",
+			cfg: scannerconfig.Config{
+				Enabled: true,
+				Timeout: -1 * time.Second,
+				CLIPath: scannerBin,
+			},
+			wantErrText: "timeout must be greater than 0",
+		},
+		{
+			name: "enabled with empty CLIPath is rejected",
+			cfg: scannerconfig.Config{
+				Enabled: true,
+				Timeout: 5 * time.Minute,
+				CLIPath: "",
+			},
+			wantErrText: "mcp-scanner binary path is required",
+		},
+		{
+			name: "enabled with positive timeout and CLIPath is accepted",
+			cfg: scannerconfig.Config{
+				Enabled: true,
+				Timeout: 5 * time.Minute,
+				CLIPath: scannerBin,
+			},
+		},
+		{
+			name: "FailOn flags are independent of validation outcome",
+			cfg: scannerconfig.Config{
+				Enabled:       true,
+				Timeout:       1 * time.Second,
+				CLIPath:       scannerBin,
+				FailOnError:   true,
+				FailOnWarning: true,
+			},
+		},
 	}
-}
 
-func TestConfig_Validate_EnabledRequiresTimeoutAndPath(t *testing.T) {
-	t.Parallel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	c := Config{Enabled: true}
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error when timeout/path missing")
-	}
+			err := tt.cfg.Validate()
 
-	c = Config{
-		Enabled: true,
-		Timeout: time.Minute,
-		CLIPath: "/bin/mcp-scanner",
-	}
+			switch {
+			case tt.wantErrText != "":
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErrText)
+				}
 
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErrText)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }

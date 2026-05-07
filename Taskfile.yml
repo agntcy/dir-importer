@@ -4,8 +4,8 @@
 version: "3"
 
 vars:
-  BIN_DIR: '{{ .BIN_DIR | default "./.bin" }}'
-  GOLANGCI_LINT_VERSION: "2.11.3"
+  BIN_DIR: "{{ .ROOT_DIR }}/.bin"
+  GOLANGCI_LINT_VERSION: "2.12.1"
   GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
@@ -20,10 +20,15 @@ tasks:
     cmds:
       - go build ./...
 
-  test:
+  test:unit:
     desc: Run unit tests
     cmds:
-      - go test -race -coverprofile=coverage.out ./...
+      - go test -race -count=1 ./...
+
+  test:unit:coverage:
+    desc: Run unit tests with coverage profile
+    cmds:
+      - go test -race -count=1 -coverprofile=coverage.out ./...
 
   lint:
     desc: Run golangci-lint
@@ -45,8 +50,10 @@ tasks:
 
   pre-commit:golangci-lint:
     desc: Run golangci-lint pre-commit hook
+    deps:
+      - deps:golangci-lint
     cmds:
-      - golangci-lint run --fix {{.CLI_ARGS | default "./..."}}
+      - "{{ .GOLANGCI_LINT_BIN }} run --fix {{ .CLI_ARGS | default \"./...\" }}"
 
   deps:
     desc: Install development dependencies and git hooks

@@ -1,155 +1,162 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-package config
+package config_test
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"strings"
 	"testing"
 
-	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
-	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
+	importerconfig "github.com/agntcy/dir-importer/config"
+	"github.com/agntcy/dir-importer/types"
+	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
-func TestConfig_Validate_MissingType(t *testing.T) {
-	t.Parallel()
+const (
+	errFilePathRequired = "file path is required"
+	testFilePath        = "/some/path.json"
+)
 
-	c := Config{RegistryURL: "https://x.com"}
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error for empty Type")
-	}
+type stubEnricher struct{}
+
+func (stubEnricher) Enrich(_ context.Context, _ <-chan *corev1.Record, _ *types.Result) (<-chan *corev1.Record, <-chan error) {
+	return nil, nil
 }
 
-func TestConfig_Validate_MissingURL(t *testing.T) {
+func TestValidate_TypeDispatch(t *testing.T) {
 	t.Parallel()
 
-	c := Config{Type: ImportTypeMCPRegistry}
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error for empty RegistryURL")
-	}
-}
+	override := stubEnricher{}
 
-func TestConfig_Validate_FileMissingPath(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	cfgPath := filepath.Join(dir, "enricher.json")
-	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	c := Config{
-		Type: ImportTypeMCP,
-		Enricher: enricherconfig.Config{
-			ConfigFile:        cfgPath,
-			RequestsPerMinute: 1,
+	tests := []struct {
+		name        string
+		cfg         importerconfig.Config
+		wantErrText string // empty = expect success
+	}{
+		{
+			name:        "empty type is rejected",
+			cfg:         importerconfig.Config{EnricherOverride: override},
+			wantErrText: "import type is required",
 		},
-		Scanner: scannerconfig.Config{Enabled: false},
+		{
+			name: "unsupported type is rejected",
+			cfg: importerconfig.Config{
+				Type:             "made-up",
+				EnricherOverride: override,
+			},
+			wantErrText: "unsupported import type",
+		},
+		{
+			name: "mcp-registry without RegistryURL is rejected",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeMCPRegistry,
+				EnricherOverride: override,
+			},
+			wantErrText: "registry URL is required",
+		},
+		{
+			name: "mcp-registry with RegistryURL is accepted",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeMCPRegistry,
+				RegistryURL:      "https://example.invalid/v0",
+				EnricherOverride: override,
+			},
+		},
+		{
+			name: "mcp file import without FilePath is rejected",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeMCP,
+				EnricherOverride: override,
+			},
+			wantErrText: errFilePathRequired,
+		},
+		{
+			name: "a2a file import without FilePath is rejected",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeA2A,
+				EnricherOverride: override,
+			},
+			wantErrText: errFilePathRequired,
+		},
+		{
+			name: "agent-skill import without FilePath is rejected",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeAgentSkill,
+				EnricherOverride: override,
+			},
+			wantErrText: errFilePathRequired,
+		},
+		{
+			name: "mcp file import with FilePath is accepted",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeMCP,
+				FilePath:         testFilePath,
+				EnricherOverride: override,
+			},
+		},
+		{
+			name: "a2a file import with FilePath is accepted",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeA2A,
+				FilePath:         testFilePath,
+				EnricherOverride: override,
+			},
+		},
+		{
+			name: "agent-skill import with FilePath is accepted",
+			cfg: importerconfig.Config{
+				Type:             importerconfig.ImportTypeAgentSkill,
+				FilePath:         testFilePath,
+				EnricherOverride: override,
+			},
+		},
 	}
 
-	if err := c.Validate(); err == nil {
-		t.Fatal("expected error for empty FilePath")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.cfg.Validate()
+
+			switch {
+			case tt.wantErrText != "":
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErrText)
+				}
+
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErrText)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }
 
-func TestConfig_Validate_FileOK(t *testing.T) {
+// EnricherOverride must short-circuit Enricher.Validate(). Without the override,
+// the zero-value enricher config would fail validation (no ConfigFile set),
+// proving the short-circuit when Validate succeeds.
+func TestValidate_EnricherOverrideShortCircuitsEnricherValidation(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-
-	cfgPath := filepath.Join(dir, "enricher.json")
-	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
+	cfgWithoutOverride := importerconfig.Config{
+		Type:     importerconfig.ImportTypeMCP,
+		FilePath: testFilePath,
+	}
+	if err := cfgWithoutOverride.Validate(); err == nil {
+		t.Fatal("expected enricher config validation to fail without EnricherOverride, got nil")
 	}
 
-	c := Config{
-		Type:     ImportTypeMCP,
-		FilePath: filepath.Join(dir, "server.json"),
-		Enricher: enricherconfig.Config{
-			ConfigFile:        cfgPath,
-			RequestsPerMinute: 1,
-		},
-		Scanner: scannerconfig.Config{Enabled: false},
+	cfgWithOverride := importerconfig.Config{
+		Type:             importerconfig.ImportTypeMCP,
+		FilePath:         testFilePath,
+		EnricherOverride: stubEnricher{},
 	}
-
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-}
-
-func TestConfig_Validate_A2AFileOK(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	cfgPath := filepath.Join(dir, "enricher.json")
-	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	c := Config{
-		Type:     ImportTypeA2A,
-		FilePath: filepath.Join(dir, "agent.json"),
-		Enricher: enricherconfig.Config{
-			ConfigFile:        cfgPath,
-			RequestsPerMinute: 1,
-		},
-		Scanner: scannerconfig.Config{Enabled: false},
-	}
-
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-}
-
-func TestConfig_Validate_AgentSkillFileOK(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	cfgPath := filepath.Join(dir, "enricher.json")
-	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	c := Config{
-		Type:     ImportTypeAgentSkill,
-		FilePath: filepath.Join(dir, "my-skill"),
-		Enricher: enricherconfig.Config{
-			ConfigFile:        cfgPath,
-			RequestsPerMinute: 1,
-		},
-		Scanner: scannerconfig.Config{Enabled: false},
-	}
-
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-}
-
-func TestConfig_Validate_OK(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	cfgPath := filepath.Join(dir, "enricher.json")
-	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	c := Config{
-		Type:        ImportTypeMCPRegistry,
-		RegistryURL: "https://registry.example.com",
-		Enricher: enricherconfig.Config{
-			ConfigFile:        cfgPath,
-			RequestsPerMinute: 1,
-		},
-		Scanner: scannerconfig.Config{Enabled: false},
-	}
-
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+	if err := cfgWithOverride.Validate(); err != nil {
+		t.Fatalf("expected EnricherOverride to bypass enricher validation, got %v", err)
 	}
 }

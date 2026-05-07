@@ -44,8 +44,14 @@ type EnrichedField struct {
 	Reasoning  string  `json:"reasoning"`
 }
 
-// New builds an Enricher from validated config.
+// New builds an Enricher from cfg. cfg.Validate is invoked explicitly here so
+// callers cannot construct a half-configured Enricher (e.g. via direct struct
+// literal) — the alternative was a runtime panic deeper in the toolhost setup.
 func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("enricher config: %w", err)
+	}
+
 	th, err := toolhost.NewFromConfigFile(ctx, cfg.ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("enricher tool host: %w", err)

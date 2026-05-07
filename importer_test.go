@@ -20,6 +20,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const fieldName = "name"
+
 // --- Mocks ---
 
 type mockFetcher struct {
@@ -208,7 +210,7 @@ func (m *mockTransformer) Transform(
 				rec := &corev1.Record{
 					Data: &structpb.Struct{
 						Fields: map[string]*structpb.Value{
-							"name": structpb.NewStringValue(name),
+							fieldName: structpb.NewStringValue(name),
 						},
 					},
 				}
@@ -654,7 +656,7 @@ func TestWriteRecordsToFile(t *testing.T) {
 	record1 := &corev1.Record{
 		Data: &structpb.Struct{
 			Fields: map[string]*structpb.Value{
-				"name":    structpb.NewStringValue("server1"),
+				fieldName: structpb.NewStringValue("server1"),
 				"version": structpb.NewStringValue("1.0.0"),
 			},
 		},
@@ -663,7 +665,7 @@ func TestWriteRecordsToFile(t *testing.T) {
 	record2 := &corev1.Record{
 		Data: &structpb.Struct{
 			Fields: map[string]*structpb.Value{
-				"name":    structpb.NewStringValue("server2"),
+				fieldName: structpb.NewStringValue("server2"),
 				"version": structpb.NewStringValue("2.0.0"),
 			},
 		},
@@ -700,5 +702,181 @@ func TestWriteRecordsToFile(t *testing.T) {
 
 	if decoded != 2 {
 		t.Errorf("decoded records = %d, want 2", decoded)
+	}
+}
+
+func TestWriteRecordsToFile_CreateFails(t *testing.T) {
+	t.Parallel()
+
+	// A path under a non-existent directory triggers os.Create failure.
+	bad := filepath.Join(t.TempDir(), "no-such-dir", "out.jsonl")
+
+	ch := make(chan *corev1.Record)
+	close(ch)
+
+	err := writeRecordsToFile(bad, ch)
+	if err == nil {
+		t.Fatal("expected error creating file under missing directory")
+	}
+
+	if !strings.Contains(err.Error(), "failed to create output file") {
+		t.Errorf("error %q does not match", err.Error())
+	}
+}
+
+func TestWriteRecordsToFile_SkipsNilRecords(t *testing.T) {
+	t.Parallel()
+
+	outputPath := filepath.Join(t.TempDir(), "skip.jsonl")
+
+	ch := make(chan *corev1.Record, 3)
+
+	ch <- nil
+
+	ch <- &corev1.Record{
+		Data: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				fieldName: structpb.NewStringValue("kept"),
+			},
+		},
+	}
+
+	ch <- nil
+
+	close(ch)
+
+	if err := writeRecordsToFile(outputPath, ch); err != nil {
+		t.Fatalf("writeRecordsToFile: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	if got := strings.Count(string(data), "\n"); got != 1 {
+		t.Errorf("encoded lines = %d, want 1 (nils should be skipped)", got)
+	}
+}
+
+func TestImporter_DryRun_ForceBypassesDedup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cfg := baseConfig()
+	cfg.Force = true
+
+	imp := testImporter(
+		cfg,
+		&mockFetcher{items: mcpSourceItems(testServer("only"))},
+		denyDedup{},
+		&mockTransformer{},
+		nil,
+		&mockPusher{},
+	)
+
+	res := imp.DryRun(ctx)
+
+	if res.TotalRecords != 1 {
+		t.Errorf("TotalRecords = %d, want 1", res.TotalRecords)
+	}
+}
+
+func TestImporter_DryRun_WithScannerEnabled(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cfg := baseConfig()
+	cfg.Scanner.Enabled = true
+
+	imp := testImporter(
+		cfg,
+		&mockFetcher{items: mcpSourceItems(testServer("a"))},
+		passThroughDedup{},
+		&mockTransformer{},
+		&mockScanner{},
+		&mockPusher{},
+	)
+
+	res := imp.DryRun(ctx)
+
+	if res.TotalRecords != 1 {
+		t.Errorf("TotalRecords = %d, want 1", res.TotalRecords)
+	}
+}
+
+func TestImporter_DryRun_PropagatesScannerError(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cfg := baseConfig()
+	cfg.Scanner.Enabled = true
+
+	imp := testImporter(
+		cfg,
+		&mockFetcher{items: mcpSourceItems(testServer("a"))},
+		passThroughDedup{},
+		&mockTransformer{},
+		&mockScanner{err: errors.New("scan setup failed")},
+		&mockPusher{},
+	)
+
+	res := imp.DryRun(ctx)
+
+	found := false
+
+	for _, e := range res.Errors {
+		if e != nil && strings.Contains(e.Error(), "scan setup failed") {
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected scanner error in Errors, got %#v", res.Errors)
+	}
+}
+
+func TestImporter_DryRun_WriteFailureSurfacedAsError(t *testing.T) {
+	ctx := context.Background()
+
+	// Make the working directory read-only so that os.Create() in
+	// writeRecordsToFile fails.
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	t.Chdir(dir)
+
+	cfg := baseConfig()
+	imp := testImporter(
+		cfg,
+		&mockFetcher{items: mcpSourceItems(testServer("a"))},
+		passThroughDedup{},
+		&mockTransformer{},
+		nil,
+		&mockPusher{},
+	)
+
+	res := imp.DryRun(ctx)
+
+	found := false
+
+	for _, e := range res.Errors {
+		if e != nil && strings.Contains(e.Error(), "failed to write records to file") {
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected write-records error, got %#v", res.Errors)
 	}
 }

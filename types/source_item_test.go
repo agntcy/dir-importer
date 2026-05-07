@@ -10,6 +10,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const fieldName = "name"
+
 func TestSourceItem_NameVersion_MCP(t *testing.T) {
 	t.Parallel()
 
@@ -26,7 +28,7 @@ func TestSourceItem_NameVersion_MCP(t *testing.T) {
 func TestSourceItem_NameVersion_A2A(t *testing.T) {
 	t.Parallel()
 
-	st, err := structpb.NewStruct(map[string]any{"name": "agent", "version": "2.0.0"})
+	st, err := structpb.NewStruct(map[string]any{fieldName: "agent", "version": "2.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +38,7 @@ func TestSourceItem_NameVersion_A2A(t *testing.T) {
 		t.Errorf("NameVersion = %q, want agent@2.0.0", got)
 	}
 
-	st2, err := structpb.NewStruct(map[string]any{"name": "onlyname"})
+	st2, err := structpb.NewStruct(map[string]any{fieldName: "onlyname"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,7 @@ func TestSourceItem_NameVersion_AgentSkill(t *testing.T) {
 	t.Parallel()
 
 	st, err := structpb.NewStruct(map[string]any{
-		"name": "my-skill",
+		fieldName: "my-skill",
 		"metadata": map[string]any{
 			"version": "3.0.0",
 		},
@@ -69,7 +71,7 @@ func TestSourceItem_NameVersion_AgentSkill(t *testing.T) {
 		t.Errorf("NameVersion = %q, want my-skill@3.0.0", got)
 	}
 
-	st2, err := structpb.NewStruct(map[string]any{"name": "only"})
+	st2, err := structpb.NewStruct(map[string]any{fieldName: "only"})
 	if err != nil {
 		t.Fatal(err)
 	}
