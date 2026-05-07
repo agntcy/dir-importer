@@ -9,10 +9,6 @@ vars:
   GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
   UV_VERSION: "0.10.11"
   UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
-  COMPOSE_FILE: "{{ .ROOT_DIR }}/tests/e2e/docker-compose.yaml"
-  COMPOSE_PROJECT: "dir-importer-e2e"
-  DIRCTL_VERSION: "1.2.0"
-  DIRCTL_BIN: "{{ .BIN_DIR }}/dirctl"
 
 tasks:
   default:
@@ -25,32 +21,14 @@ tasks:
       - go build ./...
 
   test:unit:
-    desc: Run fast, hermetic unit tests (no Docker, no LLM, no network)
+    desc: Run all tests (unit + mock-pipeline). No Docker, no LLM, no network.
     cmds:
       - go test -race -count=1 ./...
 
   test:unit:coverage:
-    desc: Run unit tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
+    desc: Run all tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
     cmds:
       - go test -race -count=1 -coverprofile=coverage.out ./...
-
-  test:e2e:
-    desc: Run live end-to-end tests (requires Docker and Azure OpenAI credentials in the environment)
-    deps:
-      - deps:dirctl
-    cmds:
-      - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
-      - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=e2e -timeout=30m -count=1 -v ./tests/e2e/...
-
-  test:e2e:coverage:
-    desc: Run e2e tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
-    deps:
-      - deps:dirctl
-    cmds:
-      - docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} up -d --wait
-      - defer: docker compose -p {{ .COMPOSE_PROJECT }} -f {{ .COMPOSE_FILE }} down -v --remove-orphans
-      - PATH="{{ .BIN_DIR }}:$PATH" go test -tags=e2e -timeout=30m -count=1 -v -coverpkg=./... -coverprofile=coverage-e2e.out ./tests/e2e/...
 
   lint:
     desc: Run golangci-lint
@@ -125,27 +103,7 @@ tasks:
       - echo "Installing mcp-scanner"
       - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
 
-  deps:dirctl:
-    desc: Ensure `dirctl` is available; download it into BIN_DIR only when missing
-    deps:
-      - deps:bin-dir
-    status:
-      - test -x {{ .DIRCTL_BIN }}
-    cmds:
-      - cmd: |
-          set -e
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          arch="$(uname -m)"
-          case "$arch" in
-            x86_64) arch="amd64" ;;
-            aarch64) arch="arm64" ;;
-          esac
-          asset="dirctl-${os}-${arch}"
-          echo "Installing ${asset} v{{ .DIRCTL_VERSION }} into {{ .BIN_DIR }}..."
-          curl -sSfL "https://github.com/agntcy/dir/releases/download/v{{ .DIRCTL_VERSION }}/${asset}" -o "{{ .DIRCTL_BIN }}"
-          chmod +x "{{ .DIRCTL_BIN }}"
-
   clean:
     desc: Clean build artifacts
     cmds:
-      - rm -rf {{ .BIN_DIR }} coverage.out coverage-e2e.out
+      - rm -rf {{ .BIN_DIR }} coverage.out

@@ -15,7 +15,7 @@ bin/
 .DS_Store
 
 # Coverage output
-coverage*.out
+coverage.out
 .coverage/
 
 # Licensei
