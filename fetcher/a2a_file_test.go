@@ -5,9 +5,22 @@ package fetcher
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/agntcy/dir-importer/types"
 )
+
+func writeA2AFixture(path, body string) error {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return fmt.Errorf("write fixture: %w", err)
+	}
+
+	return nil
+}
 
 const (
 	cardVersionV1      = "1.0.0"
@@ -203,5 +216,155 @@ func TestNewA2AFileFetcher_RejectsEmptyPath(t *testing.T) {
 				t.Fatalf("expected error for empty path %q, got nil", path)
 			}
 		})
+	}
+}
+
+func drainA2AFetch(outCh <-chan types.SourceItem, errCh <-chan error) ([]types.SourceItem, []error) {
+	var (
+		items []types.SourceItem
+		errs  []error
+		done  = make(chan struct{}, 2)
+	)
+
+	go func() {
+		for it := range outCh {
+			items = append(items, it)
+		}
+
+		done <- struct{}{}
+	}()
+
+	go func() {
+		for e := range errCh {
+			if e != nil {
+				errs = append(errs, e)
+			}
+		}
+
+		done <- struct{}{}
+	}()
+
+	<-done
+	<-done
+
+	return items, errs
+}
+
+func TestA2AFileFetcher_Fetch_SingleObjectHappyPath(t *testing.T) {
+	t.Parallel()
+
+	body := `{"name":"hello-agent","version":"1.0.0"}`
+	path := filepath.Join(t.TempDir(), "card.json")
+
+	if err := writeA2AFixture(path, body); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	f, err := NewA2AFileFetcher(path)
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher err = %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+}
+
+func TestA2AFileFetcher_Fetch_ArrayWithInvalidElement(t *testing.T) {
+	t.Parallel()
+
+	body := `[{"name":"good","version":"1.0.0"},{"version":"2.0.0"}]`
+	path := filepath.Join(t.TempDir(), "cards.json")
+
+	if err := writeA2AFixture(path, body); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	f, err := NewA2AFileFetcher(path)
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher err = %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1 (invalid card without name should be skipped)", len(items))
+	}
+
+	if len(errs) == 0 {
+		t.Fatal("expected at least one per-element error for invalid card")
+	}
+}
+
+func TestA2AFileFetcher_Fetch_FileMissing(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewA2AFileFetcher(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher err = %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items, got %d", len(items))
+	}
+
+	if len(errs) == 0 || !strings.Contains(errs[0].Error(), "read file") {
+		t.Fatalf("expected read-file error, got %v", errs)
+	}
+}
+
+func TestA2AFileFetcher_Fetch_DecodeFatalError(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "bad.json")
+	if err := writeA2AFixture(path, `{"name":`); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	f, err := NewA2AFileFetcher(path)
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher err = %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items, got %d", len(items))
+	}
+
+	if len(errs) == 0 || !strings.Contains(errs[0].Error(), "decode JSON object") {
+		t.Fatalf("expected decode-object fatal error, got %v", errs)
+	}
+}
+
+func TestA2AFileFetcher_Fetch_EmptyArray(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "empty.json")
+	if err := writeA2AFixture(path, `[]`); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	f, err := NewA2AFileFetcher(path)
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher err = %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items, got %d", len(items))
+	}
+
+	if len(errs) == 0 || !strings.Contains(errs[0].Error(), "no A2A agent cards found") {
+		t.Fatalf("expected empty-array error, got %v", errs)
 	}
 }
