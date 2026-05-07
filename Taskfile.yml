@@ -21,12 +21,12 @@ tasks:
       - go build ./...
 
   test:unit:
-    desc: Run all tests (unit + mock-pipeline). No Docker, no LLM, no network.
+    desc: Run unit tests
     cmds:
       - go test -race -count=1 ./...
 
   test:unit:coverage:
-    desc: Run all tests with coverage profile (used by CI; requires a Go toolchain that ships covdata)
+    desc: Run unit tests with coverage profile
     cmds:
       - go test -race -count=1 -coverprofile=coverage.out ./...
 

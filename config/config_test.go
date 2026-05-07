@@ -13,35 +13,17 @@ import (
 	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
-// Shared literals across test rows. Hoisted to constants because:
-//   - errFilePathRequired must match the production error string in
-//     Config.Validate (so a test still fails if that wording drifts).
-//   - testFilePath is just a stable placeholder — its value never matters,
-//     only its non-emptiness, but every row that wants to pass the
-//     "FilePath required" gate uses the same string.
 const (
 	errFilePathRequired = "file path is required"
 	testFilePath        = "/some/path.json"
 )
 
-// stubEnricher satisfies types.Enricher so we can populate EnricherOverride in
-// tests without depending on the real enricher package (which would in turn
-// pull in the LLM tool host). The methods are never called in unit tests; they
-// only exist to make the interface assertion compile.
 type stubEnricher struct{}
 
 func (stubEnricher) Enrich(_ context.Context, _ <-chan *corev1.Record, _ *types.Result) (<-chan *corev1.Record, <-chan error) {
 	return nil, nil
 }
 
-// Validate's job is dispatch + per-type required-field checks. We exercise the
-// happy path for every supported import type, the error path for each
-// type-specific missing-field, and the catch-all "unsupported import type"
-// branch.
-//
-// Every row sets EnricherOverride to a stub so that the cross-cutting call to
-// Enricher.Validate() short-circuits. Without that we would be (indirectly)
-// testing enricher/config behaviour, which has its own dedicated test file.
 func TestValidate_TypeDispatch(t *testing.T) {
 	t.Parallel()
 

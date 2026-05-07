@@ -11,15 +11,8 @@ import (
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 )
 
-// scannerBin is the placeholder CLI path used across rows that exercise the
-// "enabled with valid CLIPath" combination. The value never matters — only
-// non-emptiness — but reusing the same string keeps rows uniform.
 const scannerBin = "mcp-scanner"
 
-// Validate is dominated by the !Enabled short-circuit: the entire pipeline
-// runs without a scanner by default, so a zero-value Config must validate
-// even though it has no Timeout or CLIPath set. Once Enabled flips, both
-// fields become required.
 func TestValidate(t *testing.T) {
 	t.Parallel()
 

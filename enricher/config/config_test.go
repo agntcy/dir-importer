@@ -12,8 +12,6 @@ import (
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 )
 
-// writeFile creates a file under t.TempDir() and returns its path. It exists so
-// table rows can stay one-liners instead of repeating tmp-dir + WriteFile boilerplate.
 func writeFile(t *testing.T, name, contents string) string {
 	t.Helper()
 

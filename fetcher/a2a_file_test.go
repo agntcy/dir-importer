@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// Hoisted to constants for the same reason as in mcp_file_test.go: the version
-// and name keys appear in many test rows, and the missing-name error text
-// must match the production error string in agentCardStructFromMap.
 const (
 	cardVersionV1      = "1.0.0"
 	cardNameKey        = "name"
@@ -19,10 +16,6 @@ const (
 	errMissingCardName = "missing non-empty"
 )
 
-// drainErrs collects any errors decodeA2ARoot drained into errCh during the
-// per-element loop. This mirrors what the real Fetch goroutine consumes;
-// reading them after the call lets tests assert that malformed array elements
-// are reported individually instead of failing the whole decode.
 func drainErrs(errCh chan error) []error {
 	close(errCh)
 
@@ -132,8 +125,6 @@ func TestDecodeA2ARoot(t *testing.T) {
 	}
 }
 
-// agentCardStructFromMap is the per-card validation gate: missing or
-// whitespace-only "name" is fatal. Everything else flows through structpb.
 func TestAgentCardStructFromMap(t *testing.T) {
 	t.Parallel()
 

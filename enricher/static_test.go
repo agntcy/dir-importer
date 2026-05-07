@@ -13,11 +13,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// StaticEnricher is what downstream callers (e.g. dir's e2e suite) use to
-// bypass the LLM in test environments. The mock-pipeline tests use their own
-// inline mockEnricher, so the real StaticEnricher implementation is not
-// otherwise covered.
-
 func TestNewStaticEnricher(t *testing.T) {
 	t.Parallel()
 
@@ -190,7 +185,6 @@ func TestStaticEnricher_Enrich_ContextCancellation(t *testing.T) {
 
 	se := NewStaticEnricher()
 
-	// Unbuffered channel so the producer blocks until cancellation cleans up.
 	in := make(chan *corev1.Record)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,17 +212,14 @@ func TestStaticEnricher_Enrich_ContextCancellation(t *testing.T) {
 		}
 	}
 
-	// in is the test's responsibility; close to satisfy linters/race detector.
 	close(in)
 }
 
 func TestStaticEnricher_Enrich_StopsOnFirstError(t *testing.T) {
 	t.Parallel()
 
-	// The Enrich implementation today *returns* (closes its output) after
-	// the first nil-data error. Lock that behavior — it's a documented
-	// contract for the pipeline (downstream stages get no further records
-	// from a degraded enricher).
+	// Enrich closes its output after the first nil-data error so downstream
+	// stages get no further records from a degraded enricher.
 	se := NewStaticEnricher()
 
 	in := make(chan *corev1.Record, 2)
@@ -259,10 +250,9 @@ func drainErrCh(errCh <-chan error) {
 	}()
 }
 
-// drainBoth reads concurrently from both channels until they close, returning
-// everything observed. Required because the StaticEnricher uses unbuffered
-// channels: serialized reads (drain out, then errCh) deadlock the producer
-// the moment it has both a record and an error to send.
+// drainBoth reads concurrently from both channels until they close. Both must
+// be drained in parallel: the StaticEnricher uses unbuffered channels and a
+// serialized drain deadlocks if the producer has a record and an error to send.
 func drainBoth(t *testing.T, out <-chan *corev1.Record, errCh <-chan error) ([]*corev1.Record, []error) {
 	t.Helper()
 

@@ -8,21 +8,11 @@ import (
 	"testing"
 )
 
-// errEmptyFile is the production error string for empty MCP and A2A inputs.
-// Hoisted because it appears in several rows across the fetcher unit tests
-// and mirrors what the production code emits (so a wording drift breaks the test).
-const errEmptyFile = "file is empty"
+const (
+	errEmptyFile   = "file is empty"
+	whitespacePath = "   "
+)
 
-// whitespacePath is a non-empty whitespace string used to verify that fetchers
-// reject paths that are *only* whitespace, not just literal-empty ones.
-const whitespacePath = "   "
-
-// decodeServerResponses is the parsing kernel for MCP file imports. We test it
-// directly (rather than driving Fetch end-to-end) because every interesting
-// branch lives here: empty input, JSON array, bare ServerJSON, and the
-// missing-server-name pruning rules. Driving Fetch instead would force us to
-// touch the filesystem and the channel plumbing for what is fundamentally a
-// pure-function test.
 func TestDecodeServerResponses(t *testing.T) {
 	t.Parallel()
 

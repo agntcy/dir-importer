@@ -16,22 +16,17 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// The mock-pipeline tests in importer_test.go use a mockScanner and never
-// exercise the production scanner stage at this package's wiring layer.
-// These tests target Scanner.Scan directly, plus the mergeScanResults helper.
-
 const errorMessage = "boom"
 
-// fakeScanner is a controllable scannertypes.Scanner for unit testing.
-type fakeScanner struct {
+type mockScanner struct {
 	name   string
 	result *scannertypes.ScanResult
 	err    error
 }
 
-func (f *fakeScanner) Name() string { return f.name }
-func (f *fakeScanner) Scan(_ context.Context, _ *corev1.Record) (*scannertypes.ScanResult, error) {
-	return f.result, f.err
+func (m *mockScanner) Name() string { return m.name }
+func (m *mockScanner) Scan(_ context.Context, _ *corev1.Record) (*scannertypes.ScanResult, error) {
+	return m.result, m.err
 }
 
 func newScannerStage(scanners []scannertypes.Scanner, cfg scannerconfig.Config) *Scanner {
@@ -180,8 +175,8 @@ func TestScan_AllSafe_PassesAllRecords(t *testing.T) {
 	t.Parallel()
 
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "ok-1", result: &scannertypes.ScanResult{Safe: true}},
-		&fakeScanner{name: "ok-2", result: &scannertypes.ScanResult{Safe: true}},
+		&mockScanner{name: "ok-1", result: &scannertypes.ScanResult{Safe: true}},
+		&mockScanner{name: "ok-2", result: &scannertypes.ScanResult{Safe: true}},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record, 1)
@@ -212,7 +207,7 @@ func TestScan_FailOnError_DropsRecord(t *testing.T) {
 	t.Parallel()
 
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "broken", result: &scannertypes.ScanResult{
+		&mockScanner{name: "broken", result: &scannertypes.ScanResult{
 			Safe: false,
 			Findings: []scannertypes.Finding{
 				{Severity: scannertypes.SeverityError, Message: errorMessage},
@@ -248,7 +243,7 @@ func TestScan_FailOnWarning_DropsRecord(t *testing.T) {
 	t.Parallel()
 
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "noisy", result: &scannertypes.ScanResult{
+		&mockScanner{name: "noisy", result: &scannertypes.ScanResult{
 			Safe: false,
 			Findings: []scannertypes.Finding{
 				{Severity: scannertypes.SeverityWarning, Message: "watch out"},
@@ -287,7 +282,7 @@ func TestScan_FailOnErrorWithOnlyWarnings_PassesRecord(t *testing.T) {
 	// warning-only records should still be reported on the result but pass
 	// through unless FailOnWarning is also set.
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "warnings-only", result: &scannertypes.ScanResult{
+		&mockScanner{name: "warnings-only", result: &scannertypes.ScanResult{
 			Safe: false,
 			Findings: []scannertypes.Finding{
 				{Severity: scannertypes.SeverityWarning, Message: "iffy"},
@@ -327,8 +322,8 @@ func TestScan_AllScannersFail_RecordPassesAndErrorEmitted(t *testing.T) {
 	// NOT dropped (we don't want a transient scanner outage to silently
 	// reject records) — we emit an error and pass the record through.
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "down-1", err: errors.New("scanner offline")},
-		&fakeScanner{name: "down-2", err: errors.New("scanner offline")},
+		&mockScanner{name: "down-1", err: errors.New("scanner offline")},
+		&mockScanner{name: "down-2", err: errors.New("scanner offline")},
 	}, scannerconfig.Config{FailOnError: true})
 
 	in := make(chan *corev1.Record, 1)
@@ -391,8 +386,8 @@ func TestScan_OneScannerFailsOthersSucceed_NoStageError(t *testing.T) {
 	// succeeds, the merged result should drive the decision — no stage
 	// error should be emitted.
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "up", result: &scannertypes.ScanResult{Safe: true}},
-		&fakeScanner{name: "down", err: errors.New("scanner offline")},
+		&mockScanner{name: "up", result: &scannertypes.ScanResult{Safe: true}},
+		&mockScanner{name: "down", err: errors.New("scanner offline")},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record, 1)
@@ -431,7 +426,7 @@ func TestScan_RecordsFindings(t *testing.T) {
 	t.Parallel()
 
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "noisy", result: &scannertypes.ScanResult{
+		&mockScanner{name: "noisy", result: &scannertypes.ScanResult{
 			Safe: false,
 			Findings: []scannertypes.Finding{
 				{Severity: scannertypes.SeverityWarning, Message: "watch"},
@@ -463,7 +458,7 @@ func TestScan_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	stage := newScannerStage([]scannertypes.Scanner{
-		&fakeScanner{name: "noop", result: &scannertypes.ScanResult{Safe: true}},
+		&mockScanner{name: "noop", result: &scannertypes.ScanResult{Safe: true}},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record) // unbuffered: no producer feeds

@@ -11,11 +11,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// LLM-driven flows (Enrich, enrichRecord, complete) are exercised through
-// importer_test.go's mockEnricher rather than here. These tests cover the
-// pure helpers that mock-pipeline tests bypass: JSON parsing of the LLM
-// response payloads and writing taxonomy results back into structpb.
-
 const fieldName = "name"
 
 func TestParseSkillsJSON_HappyPath(t *testing.T) {
@@ -300,9 +295,8 @@ func TestSetStructDomains_OmitsZeroes(t *testing.T) {
 func TestEnrichedField_JSONShape(t *testing.T) {
 	t.Parallel()
 
-	// The JSON tags on EnrichedField are the contract between the prompt
-	// schema and the parser. If a field is renamed, callers stop receiving
-	// LLM output. Lock that contract here.
+	// EnrichedField JSON tags are the contract between the prompt schema and the
+	// parser; renaming any tag silently breaks LLM-driven enrichment.
 	got, err := parseSkillsJSON(`{"skills":[{"name":"n","id":42,"confidence":0.99,"reasoning":"r"}]}`)
 	if err != nil {
 		t.Fatalf("parseSkillsJSON: %v", err)

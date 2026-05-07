@@ -14,11 +14,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// The mock-pipeline tests in importer_test.go install a mockTransformer and
-// never exercise the real translator-backed conversions. These tests fill that
-// gap by driving the production Transformer with valid MCP/A2A/Agent Skill
-// payloads.
-
 const (
 	fixtureName        = "io.test/transformer-fixture"
 	fixtureVersion     = "1.0.0"
@@ -44,8 +39,7 @@ func TestTransformRecord_MCP_Success(t *testing.T) {
 		t.Fatal("returned record has no data")
 	}
 
-	// Production code attaches the original MCP payload so push-time
-	// failures can be debugged. Lock that contract here.
+	// __mcp_debug_source carries the original MCP payload so push-time failures can be debugged.
 	if dbg, ok := rec.GetData().GetFields()["__mcp_debug_source"]; !ok || dbg.GetStringValue() == "" {
 		t.Errorf("__mcp_debug_source not attached: %+v", rec.GetData().GetFields())
 	}
@@ -131,9 +125,8 @@ func TestTransformRecord_AgentSkill_Success(t *testing.T) {
 		t.Fatal("returned record has no data")
 	}
 
-	// Unlike MCP and A2A, agent-skill records intentionally do NOT carry a
-	// debug source field — server-side OASF validation rejects unknown
-	// fields. Lock that decision.
+	// Agent-skill records must not carry a debug source field; server-side OASF
+	// validation rejects unknown fields on this type.
 	if _, ok := rec.GetData().GetFields()["__agentskill_debug_source"]; ok {
 		t.Error("agent-skill records must not carry __agentskill_debug_source")
 	}

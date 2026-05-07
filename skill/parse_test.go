@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// Hoisted to constants so the linter (and the next reader) can see at a glance
-// which literals are *production-meaningful* — error strings the splitter
-// returns, the canonical body marker — versus inline scratch values.
 const (
 	errSkillEmpty            = "SKILL.md is empty"
 	errSkillFrontmatterClose = "frontmatter must end with ---"
@@ -20,10 +17,6 @@ const (
 	skillName                = "name: code-review"
 )
 
-// splitSkillFrontmatter is the YAML frontmatter splitter for SKILL.md. It is
-// the kernel of the SKILL.md parser, with several tricky edge cases (BOM, CRLF,
-// missing closing delimiter, empty body) that the e2e suite cannot
-// enumerate cheaply.
 func TestSplitSkillFrontmatter(t *testing.T) {
 	t.Parallel()
 
