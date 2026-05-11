@@ -5,9 +5,7 @@ package importer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -19,6 +17,7 @@ import (
 	"github.com/agntcy/dir-importer/scanner"
 	"github.com/agntcy/dir-importer/transformer"
 	"github.com/agntcy/dir-importer/types"
+	"github.com/agntcy/dir-importer/utils"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
@@ -226,7 +225,10 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 }
 
 func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
-	outputFile := fmt.Sprintf("import-dry-%s-run.jsonl", time.Now().Format("2006-01-02-150405"))
+	outputDir := i.cfg.OutputDir
+	if outputDir == "" {
+		outputDir = fmt.Sprintf("import-dry-run-%s", time.Now().Format("2006-01-02-150405"))
+	}
 
 	result := &types.Result{}
 
@@ -315,7 +317,7 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		}
 	}()
 
-	// Collect records - write to file
+	// Collect records - write to directory, one file per record
 	go func() {
 		defer wg.Done()
 
@@ -324,9 +326,9 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 			}
 		}()
 
-		if err := writeRecordsToFile(outputFile, fileInputCh); err != nil {
+		if err := utils.WriteRecords(outputDir, fileInputCh); err != nil {
 			result.Mu.Lock()
-			result.Errors = append(result.Errors, fmt.Errorf("failed to write records to file: %w", err))
+			result.Errors = append(result.Errors, fmt.Errorf("failed to write records: %w", err))
 			result.Mu.Unlock()
 		}
 	}()
@@ -339,31 +341,8 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		SkippedCount:    result.SkippedCount,
 		FailedCount:     result.FailedCount,
 		Errors:          result.Errors,
-		OutputFile:      outputFile,
+		OutputDir:       outputDir,
 		ImportedCIDs:    result.ImportedCIDs,
 		ScannerFindings: result.ScannerFindings,
 	}
-}
-
-// writeRecordsToFile writes records from the channel to a file in JSONL format.
-func writeRecordsToFile(outputPath string, recordsCh <-chan *corev1.Record) error {
-	file, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-
-	for record := range recordsCh {
-		if record == nil {
-			continue
-		}
-
-		if err := encoder.Encode(record.GetData()); err != nil {
-			return fmt.Errorf("failed to encode record: %w", err)
-		}
-	}
-
-	return nil
 }

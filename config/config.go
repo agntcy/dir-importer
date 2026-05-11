@@ -49,6 +49,7 @@ type Config struct {
 	Filters     map[string]string // Registry-specific filters
 	Limit       int               // Number of records to import (default: 0 for all)
 	DryRun      bool              // If true, preview without actually importing
+	OutputDir   string            // Output directory for dry-run records; when empty, defaults to import-dry-run-<timestamp> in the current working directory
 	SignFunc    SignFunc          // Function to sign records (if set, signing is enabled)
 
 	Force bool // If true, push even if record already exists

@@ -23,7 +23,7 @@ type ImportResult struct {
 	SkippedCount    int
 	FailedCount     int
 	Errors          []error
-	OutputFile      string
+	OutputDir       string
 	ImportedCIDs    []string
 	ScannerFindings []string
 }
