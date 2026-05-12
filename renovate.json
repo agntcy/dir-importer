@@ -46,8 +46,7 @@
       "matchDatasources": ["go"],
       "matchPackageNames": [
         "github.com/agntcy/dir/api",
-        "github.com/agntcy/dir/client",
-        "github.com/agntcy/dir/utils"
+        "github.com/agntcy/dir/client"
       ],
       "addLabels": ["agntcy", "release"],
       "automerge": false,

@@ -14,8 +14,8 @@ import (
 	scannertypes "github.com/agntcy/dir-importer/scanner/types"
 	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/types"
+	"github.com/agntcy/dir-importer/utils/logging"
 	corev1 "github.com/agntcy/dir/api/core/v1"
-	"github.com/agntcy/dir/utils/logging"
 )
 
 var logger = logging.Logger("importer/scanner")
