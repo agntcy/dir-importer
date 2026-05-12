@@ -5,7 +5,11 @@ package importer
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,7 +21,6 @@ import (
 	"github.com/agntcy/dir-importer/scanner"
 	"github.com/agntcy/dir-importer/transformer"
 	"github.com/agntcy/dir-importer/types"
-	"github.com/agntcy/dir-importer/utils"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
@@ -326,7 +329,7 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 			}
 		}()
 
-		if err := utils.WriteRecords(outputDir, fileInputCh); err != nil {
+		if err := writeRecords(outputDir, fileInputCh); err != nil {
 			result.Mu.Lock()
 			result.Errors = append(result.Errors, fmt.Errorf("failed to write records: %w", err))
 			result.Mu.Unlock()
@@ -345,4 +348,57 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		ImportedCIDs:    result.ImportedCIDs,
 		ScannerFindings: result.ScannerFindings,
 	}
+}
+
+// writeRecords writes one JSON file per record into outputDir, named by the
+// record's CID (`<cid>.record.json`).
+func writeRecords(outputDir string, recordsCh <-chan *corev1.Record) error {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil { //nolint:mnd
+		// Drain to avoid blocking upstream stages.
+		for range recordsCh {
+		}
+
+		return fmt.Errorf("failed to create output directory %q: %w", outputDir, err)
+	}
+
+	var writeErrs []error
+
+	for record := range recordsCh {
+		if record == nil {
+			continue
+		}
+
+		if err := writeRecord(outputDir, record); err != nil {
+			writeErrs = append(writeErrs, err)
+		}
+	}
+
+	if len(writeErrs) > 0 {
+		return errors.Join(writeErrs...)
+	}
+
+	return nil
+}
+
+func writeRecord(outputDir string, record *corev1.Record) error {
+	cid := record.GetCid()
+	if cid == "" {
+		return errors.New("failed to derive CID for record")
+	}
+
+	payload, err := json.Marshal(record.GetData())
+	if err != nil {
+		return fmt.Errorf("failed to encode record %q: %w", cid, err)
+	}
+
+	fileName := cid + ".record.json"
+
+	// CIDs have no path separators, so Join cannot escape outputDir.
+	outputPath := filepath.Join(outputDir, fileName)
+
+	if err := os.WriteFile(outputPath, payload, 0o640); err != nil { //nolint:mnd,gosec
+		return fmt.Errorf("failed to write record %q: %w", fileName, err)
+	}
+
+	return nil
 }

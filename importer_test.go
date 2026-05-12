@@ -5,6 +5,7 @@ package importer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -814,5 +815,232 @@ func TestImporter_DryRun_WriteFailureSurfacedAsError(t *testing.T) {
 
 	if !found {
 		t.Errorf("expected write-records error, got %#v", res.Errors)
+	}
+}
+
+// --- writeRecords helpers ---
+
+func recordWithFields(fields map[string]string) *corev1.Record {
+	pbFields := make(map[string]*structpb.Value, len(fields))
+	for k, v := range fields {
+		pbFields[k] = structpb.NewStringValue(v)
+	}
+
+	return &corev1.Record{Data: &structpb.Struct{Fields: pbFields}}
+}
+
+//nolint:goconst
+func TestWriteRecords_OneFilePerRecord(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r1 := recordWithFields(map[string]string{fieldName: "server1", "version": "1.0.0"})
+	r2 := recordWithFields(map[string]string{fieldName: "server2", "version": "2.0.0"})
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r1
+
+	ch <- r2
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("got %d files, want 2", len(entries))
+	}
+
+	wantNames := map[string]bool{
+		r1.GetCid() + ".record.json": true,
+		r2.GetCid() + ".record.json": true,
+	}
+
+	for _, e := range entries {
+		if !wantNames[e.Name()] {
+			t.Errorf("unexpected filename %q (not a CID-derived name)", e.Name())
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", e.Name(), err)
+		}
+
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Unmarshal(%q): %v\n%s", e.Name(), err, string(data))
+		}
+
+		if _, ok := decoded[fieldName]; !ok {
+			t.Errorf("file %q missing %q field: %v", e.Name(), fieldName, decoded)
+		}
+	}
+}
+
+// Identical records share a CID and collapse into a single file (natural
+// dedup via content addressing).
+func TestWriteRecords_IdenticalRecordsDeduplicate(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r := recordWithFields(map[string]string{fieldName: "same", "version": "1.0.0"})
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r
+
+	ch <- r
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("got %d files, want 1 (identical records dedup by CID)", len(entries))
+	}
+
+	want := r.GetCid() + ".record.json"
+	if entries[0].Name() != want {
+		t.Errorf("filename = %q, want %q", entries[0].Name(), want)
+	}
+}
+
+// Distinct records produce distinct CIDs and therefore distinct filenames
+// without any collision-counter machinery.
+func TestWriteRecords_DistinctRecordsDistinctFilenames(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r1 := recordWithFields(map[string]string{fieldName: "dup", "version": "1.0.0", "extra": "alpha"})
+	r2 := recordWithFields(map[string]string{fieldName: "dup", "version": "1.0.0", "extra": "beta"})
+
+	if r1.GetCid() == r2.GetCid() {
+		t.Fatalf("test setup: distinct records produced identical CIDs (%q)", r1.GetCid())
+	}
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r1
+
+	ch <- r2
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	got := map[string]bool{}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+
+	for _, want := range []string{
+		r1.GetCid() + ".record.json",
+		r2.GetCid() + ".record.json",
+	} {
+		if !got[want] {
+			t.Errorf("missing expected file %q; got %v", want, got)
+		}
+	}
+}
+
+func TestWriteRecords_SkipsNilRecords(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	ch := make(chan *corev1.Record, 3)
+
+	ch <- nil
+
+	ch <- recordWithFields(map[string]string{fieldName: "kept"})
+
+	ch <- nil
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("got %d files, want 1 (nils should be skipped)", len(entries))
+	}
+}
+
+// A record with no Data has no derivable CID and must surface a per-record
+// error rather than silently writing an unnamed file.
+func TestWriteRecords_RecordWithoutDataErrors(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	ch := make(chan *corev1.Record, 1)
+
+	ch <- &corev1.Record{}
+
+	close(ch)
+
+	err := writeRecords(dir, ch)
+	if err == nil {
+		t.Fatal("expected error for record without derivable CID")
+	}
+
+	if !strings.Contains(err.Error(), "CID") {
+		t.Errorf("error %q does not mention CID", err.Error())
+	}
+}
+
+func TestWriteRecords_MkdirFails(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	notADir := filepath.Join(parent, "blocker")
+
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	bad := filepath.Join(notADir, "out")
+
+	ch := make(chan *corev1.Record)
+	close(ch)
+
+	err := writeRecords(bad, ch)
+	if err == nil {
+		t.Fatal("expected error creating directory under a regular file")
+	}
+
+	if !strings.Contains(err.Error(), "failed to create output directory") {
+		t.Errorf("error %q does not match expected prefix", err.Error())
 	}
 }
