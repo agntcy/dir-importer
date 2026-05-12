@@ -26,6 +26,7 @@ linters:
     - testpackage
     - varnamelen
     - wsl
+    - gomodguard # deprecated
   settings:
     cyclop:
       max-complexity: 15

@@ -14,9 +14,9 @@ import (
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/enricher/toolhost"
+	"github.com/agntcy/dir-importer/internal/utils/logging"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
-	"github.com/agntcy/dir/utils/logging"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/types/known/structpb"
 )

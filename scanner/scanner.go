@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/agntcy/dir-importer/internal/utils/logging"
 	_ "github.com/agntcy/dir-importer/scanner/behavioral" // register behavioral scanner
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/scanner/factory"
@@ -15,7 +16,6 @@ import (
 	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
-	"github.com/agntcy/dir/utils/logging"
 )
 
 var logger = logging.Logger("importer/scanner")

@@ -19,7 +19,6 @@ approved = [
 ignored = [
   "github.com/agntcy/dir/api",
   "github.com/agntcy/dir/client",
-  "github.com/agntcy/dir/utils",
   "github.com/agntcy/dir/runtime/api",
   "buf.build/gen/go/agntcy/oasf/protocolbuffers/go",
   "buf.build/gen/go/agntcy/oasf-sdk/protocolbuffers/go",
