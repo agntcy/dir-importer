@@ -11,7 +11,7 @@ import (
 	"os"
 
 	"github.com/agntcy/dir-importer/config"
-	"github.com/agntcy/dir-importer/utils/logging"
+	"github.com/agntcy/dir-importer/internal/utils/logging"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )

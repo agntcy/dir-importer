@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/agntcy/dir-importer/config"
+	"github.com/agntcy/dir-importer/internal/utils/logging"
 	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/types"
-	"github.com/agntcy/dir-importer/utils/logging"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	searchv1 "github.com/agntcy/dir/api/search/v1"
 )
