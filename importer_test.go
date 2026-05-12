@@ -612,9 +612,9 @@ func TestImporter_Run_ScannerErrorRecorded(t *testing.T) {
 	}
 }
 
-// --- Dry run & file ---
+// --- Dry run & directory output ---
 
-func TestImporter_DryRun_WritesOutputFile(t *testing.T) {
+func TestImporter_DryRun_WritesDefaultOutputDir(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -634,128 +634,64 @@ func TestImporter_DryRun_WritesOutputFile(t *testing.T) {
 		t.Errorf("TotalRecords = %d, want 2", res.TotalRecords)
 	}
 
-	path := filepath.Join(dir, filepath.Base(res.OutputFile))
+	if res.OutputDir == "" {
+		t.Fatal("OutputDir is empty; expected a default to be generated")
+	}
 
-	data, err := os.ReadFile(path)
+	if !strings.HasPrefix(res.OutputDir, "import-dry-run-") {
+		t.Errorf("OutputDir = %q, want prefix %q", res.OutputDir, "import-dry-run-")
+	}
+
+	// The default directory is created relative to the current working
+	// directory; ensure it actually exists and contains one file per record.
+	resolvedDir := filepath.Join(dir, res.OutputDir)
+
+	entries, err := os.ReadDir(resolvedDir)
 	if err != nil {
-		t.Fatalf("read output: %v", err)
+		t.Fatalf("ReadDir(%q): %v", resolvedDir, err)
 	}
 
-	lines := strings.Count(string(data), "\n")
-	if lines < 2 {
-		t.Errorf("expected at least 2 JSONL lines, got %d newline(s)", lines)
-	}
-}
-
-func TestWriteRecordsToFile(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	outputPath := filepath.Join(dir, "records.jsonl")
-
-	record1 := &corev1.Record{
-		Data: &structpb.Struct{
-			Fields: map[string]*structpb.Value{
-				fieldName: structpb.NewStringValue("server1"),
-				"version": structpb.NewStringValue("1.0.0"),
-			},
-		},
+	if len(entries) != 2 {
+		t.Errorf("ReadDir(%q) returned %d entries, want 2", resolvedDir, len(entries))
 	}
 
-	record2 := &corev1.Record{
-		Data: &structpb.Struct{
-			Fields: map[string]*structpb.Value{
-				fieldName: structpb.NewStringValue("server2"),
-				"version": structpb.NewStringValue("2.0.0"),
-			},
-		},
-	}
-
-	ch := make(chan *corev1.Record, 2)
-	ch <- record1
-
-	ch <- record2
-
-	close(ch)
-
-	if err := writeRecordsToFile(outputPath, ch); err != nil {
-		t.Fatalf("writeRecordsToFile: %v", err)
-	}
-
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-
-	dec := json.NewDecoder(strings.NewReader(string(data)))
-
-	var decoded int
-
-	for dec.More() {
-		var m map[string]any
-		if err := dec.Decode(&m); err != nil {
-			t.Fatalf("Decode: %v", err)
+	for _, e := range entries {
+		if e.IsDir() {
+			t.Errorf("unexpected sub-directory %q in output dir", e.Name())
 		}
 
-		decoded++
-	}
-
-	if decoded != 2 {
-		t.Errorf("decoded records = %d, want 2", decoded)
+		if !strings.HasSuffix(e.Name(), ".json") {
+			t.Errorf("file %q does not have .json suffix", e.Name())
+		}
 	}
 }
 
-func TestWriteRecordsToFile_CreateFails(t *testing.T) {
-	t.Parallel()
+func TestImporter_DryRun_UsesConfiguredOutputDir(t *testing.T) {
+	ctx := context.Background()
 
-	// A path under a non-existent directory triggers os.Create failure.
-	bad := filepath.Join(t.TempDir(), "no-such-dir", "out.jsonl")
+	root := t.TempDir()
+	configured := filepath.Join(root, "nested", "out")
 
-	ch := make(chan *corev1.Record)
-	close(ch)
+	cfg := baseConfig()
+	cfg.OutputDir = configured
 
-	err := writeRecordsToFile(bad, ch)
-	if err == nil {
-		t.Fatal("expected error creating file under missing directory")
+	fetcher := &mockFetcher{items: mcpSourceItems(testServer("only"))}
+
+	imp := testImporter(cfg, fetcher, passThroughDedup{}, &mockTransformer{}, nil, &mockPusher{})
+
+	res := imp.DryRun(ctx)
+
+	if res.OutputDir != configured {
+		t.Errorf("OutputDir = %q, want %q", res.OutputDir, configured)
 	}
 
-	if !strings.Contains(err.Error(), "failed to create output file") {
-		t.Errorf("error %q does not match", err.Error())
-	}
-}
-
-func TestWriteRecordsToFile_SkipsNilRecords(t *testing.T) {
-	t.Parallel()
-
-	outputPath := filepath.Join(t.TempDir(), "skip.jsonl")
-
-	ch := make(chan *corev1.Record, 3)
-
-	ch <- nil
-
-	ch <- &corev1.Record{
-		Data: &structpb.Struct{
-			Fields: map[string]*structpb.Value{
-				fieldName: structpb.NewStringValue("kept"),
-			},
-		},
-	}
-
-	ch <- nil
-
-	close(ch)
-
-	if err := writeRecordsToFile(outputPath, ch); err != nil {
-		t.Fatalf("writeRecordsToFile: %v", err)
-	}
-
-	data, err := os.ReadFile(outputPath)
+	entries, err := os.ReadDir(configured)
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("ReadDir(%q): %v", configured, err)
 	}
 
-	if got := strings.Count(string(data), "\n"); got != 1 {
-		t.Errorf("encoded lines = %d, want 1 (nils should be skipped)", got)
+	if len(entries) != 1 {
+		t.Errorf("got %d entries, want 1", len(entries))
 	}
 }
 
@@ -844,17 +780,18 @@ func TestImporter_DryRun_PropagatesScannerError(t *testing.T) {
 func TestImporter_DryRun_WriteFailureSurfacedAsError(t *testing.T) {
 	ctx := context.Background()
 
-	// Make the working directory read-only so that os.Create() in
-	// writeRecordsToFile fails.
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatalf("chmod: %v", err)
+	// Point the importer at a configured output directory whose parent is a
+	// regular file, which makes os.MkdirAll inside writeRecordsToDir fail.
+	parent := t.TempDir()
+
+	notADir := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
 	}
 
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	t.Chdir(dir)
-
 	cfg := baseConfig()
+	cfg.OutputDir = filepath.Join(notADir, "out")
+
 	imp := testImporter(
 		cfg,
 		&mockFetcher{items: mcpSourceItems(testServer("a"))},
@@ -869,7 +806,7 @@ func TestImporter_DryRun_WriteFailureSurfacedAsError(t *testing.T) {
 	found := false
 
 	for _, e := range res.Errors {
-		if e != nil && strings.Contains(e.Error(), "failed to write records to file") {
+		if e != nil && strings.Contains(e.Error(), "failed to write records") {
 			found = true
 
 			break
@@ -878,5 +815,232 @@ func TestImporter_DryRun_WriteFailureSurfacedAsError(t *testing.T) {
 
 	if !found {
 		t.Errorf("expected write-records error, got %#v", res.Errors)
+	}
+}
+
+// --- writeRecords helpers ---
+
+func recordWithFields(fields map[string]string) *corev1.Record {
+	pbFields := make(map[string]*structpb.Value, len(fields))
+	for k, v := range fields {
+		pbFields[k] = structpb.NewStringValue(v)
+	}
+
+	return &corev1.Record{Data: &structpb.Struct{Fields: pbFields}}
+}
+
+//nolint:goconst
+func TestWriteRecords_OneFilePerRecord(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r1 := recordWithFields(map[string]string{fieldName: "server1", "version": "1.0.0"})
+	r2 := recordWithFields(map[string]string{fieldName: "server2", "version": "2.0.0"})
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r1
+
+	ch <- r2
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("got %d files, want 2", len(entries))
+	}
+
+	wantNames := map[string]bool{
+		r1.GetCid() + ".record.json": true,
+		r2.GetCid() + ".record.json": true,
+	}
+
+	for _, e := range entries {
+		if !wantNames[e.Name()] {
+			t.Errorf("unexpected filename %q (not a CID-derived name)", e.Name())
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", e.Name(), err)
+		}
+
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Unmarshal(%q): %v\n%s", e.Name(), err, string(data))
+		}
+
+		if _, ok := decoded[fieldName]; !ok {
+			t.Errorf("file %q missing %q field: %v", e.Name(), fieldName, decoded)
+		}
+	}
+}
+
+// Identical records share a CID and collapse into a single file (natural
+// dedup via content addressing).
+func TestWriteRecords_IdenticalRecordsDeduplicate(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r := recordWithFields(map[string]string{fieldName: "same", "version": "1.0.0"})
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r
+
+	ch <- r
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("got %d files, want 1 (identical records dedup by CID)", len(entries))
+	}
+
+	want := r.GetCid() + ".record.json"
+	if entries[0].Name() != want {
+		t.Errorf("filename = %q, want %q", entries[0].Name(), want)
+	}
+}
+
+// Distinct records produce distinct CIDs and therefore distinct filenames
+// without any collision-counter machinery.
+func TestWriteRecords_DistinctRecordsDistinctFilenames(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	r1 := recordWithFields(map[string]string{fieldName: "dup", "version": "1.0.0", "extra": "alpha"})
+	r2 := recordWithFields(map[string]string{fieldName: "dup", "version": "1.0.0", "extra": "beta"})
+
+	if r1.GetCid() == r2.GetCid() {
+		t.Fatalf("test setup: distinct records produced identical CIDs (%q)", r1.GetCid())
+	}
+
+	ch := make(chan *corev1.Record, 2)
+
+	ch <- r1
+
+	ch <- r2
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	got := map[string]bool{}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+
+	for _, want := range []string{
+		r1.GetCid() + ".record.json",
+		r2.GetCid() + ".record.json",
+	} {
+		if !got[want] {
+			t.Errorf("missing expected file %q; got %v", want, got)
+		}
+	}
+}
+
+func TestWriteRecords_SkipsNilRecords(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	ch := make(chan *corev1.Record, 3)
+
+	ch <- nil
+
+	ch <- recordWithFields(map[string]string{fieldName: "kept"})
+
+	ch <- nil
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("got %d files, want 1 (nils should be skipped)", len(entries))
+	}
+}
+
+// A record with no Data has no derivable CID and must surface a per-record
+// error rather than silently writing an unnamed file.
+func TestWriteRecords_RecordWithoutDataErrors(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	ch := make(chan *corev1.Record, 1)
+
+	ch <- &corev1.Record{}
+
+	close(ch)
+
+	err := writeRecords(dir, ch)
+	if err == nil {
+		t.Fatal("expected error for record without derivable CID")
+	}
+
+	if !strings.Contains(err.Error(), "CID") {
+		t.Errorf("error %q does not mention CID", err.Error())
+	}
+}
+
+func TestWriteRecords_MkdirFails(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	notADir := filepath.Join(parent, "blocker")
+
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	bad := filepath.Join(notADir, "out")
+
+	ch := make(chan *corev1.Record)
+	close(ch)
+
+	err := writeRecords(bad, ch)
+	if err == nil {
+		t.Fatal("expected error creating directory under a regular file")
+	}
+
+	if !strings.Contains(err.Error(), "failed to create output directory") {
+		t.Errorf("error %q does not match expected prefix", err.Error())
 	}
 }

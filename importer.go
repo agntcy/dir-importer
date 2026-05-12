@@ -6,8 +6,10 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -226,7 +228,10 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 }
 
 func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
-	outputFile := fmt.Sprintf("import-dry-%s-run.jsonl", time.Now().Format("2006-01-02-150405"))
+	outputDir := i.cfg.OutputDir
+	if outputDir == "" {
+		outputDir = fmt.Sprintf("import-dry-run-%s", time.Now().Format("2006-01-02-150405"))
+	}
 
 	result := &types.Result{}
 
@@ -315,7 +320,7 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		}
 	}()
 
-	// Collect records - write to file
+	// Collect records - write to directory, one file per record
 	go func() {
 		defer wg.Done()
 
@@ -324,9 +329,9 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 			}
 		}()
 
-		if err := writeRecordsToFile(outputFile, fileInputCh); err != nil {
+		if err := writeRecords(outputDir, fileInputCh); err != nil {
 			result.Mu.Lock()
-			result.Errors = append(result.Errors, fmt.Errorf("failed to write records to file: %w", err))
+			result.Errors = append(result.Errors, fmt.Errorf("failed to write records: %w", err))
 			result.Mu.Unlock()
 		}
 	}()
@@ -339,30 +344,60 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		SkippedCount:    result.SkippedCount,
 		FailedCount:     result.FailedCount,
 		Errors:          result.Errors,
-		OutputFile:      outputFile,
+		OutputDir:       outputDir,
 		ImportedCIDs:    result.ImportedCIDs,
 		ScannerFindings: result.ScannerFindings,
 	}
 }
 
-// writeRecordsToFile writes records from the channel to a file in JSONL format.
-func writeRecordsToFile(outputPath string, recordsCh <-chan *corev1.Record) error {
-	file, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-	defer file.Close()
+// writeRecords writes one JSON file per record into outputDir, named by the
+// record's CID (`<cid>.record.json`).
+func writeRecords(outputDir string, recordsCh <-chan *corev1.Record) error {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil { //nolint:mnd
+		// Drain to avoid blocking upstream stages.
+		for range recordsCh {
+		}
 
-	encoder := json.NewEncoder(file)
+		return fmt.Errorf("failed to create output directory %q: %w", outputDir, err)
+	}
+
+	var writeErrs []error
 
 	for record := range recordsCh {
 		if record == nil {
 			continue
 		}
 
-		if err := encoder.Encode(record.GetData()); err != nil {
-			return fmt.Errorf("failed to encode record: %w", err)
+		if err := writeRecord(outputDir, record); err != nil {
+			writeErrs = append(writeErrs, err)
 		}
+	}
+
+	if len(writeErrs) > 0 {
+		return errors.Join(writeErrs...)
+	}
+
+	return nil
+}
+
+func writeRecord(outputDir string, record *corev1.Record) error {
+	cid := record.GetCid()
+	if cid == "" {
+		return errors.New("failed to derive CID for record")
+	}
+
+	payload, err := json.Marshal(record.GetData())
+	if err != nil {
+		return fmt.Errorf("failed to encode record %q: %w", cid, err)
+	}
+
+	fileName := cid + ".record.json"
+
+	// CIDs have no path separators, so Join cannot escape outputDir.
+	outputPath := filepath.Join(outputDir, fileName)
+
+	if err := os.WriteFile(outputPath, payload, 0o640); err != nil { //nolint:mnd,gosec
+		return fmt.Errorf("failed to write record %q: %w", fileName, err)
 	}
 
 	return nil
