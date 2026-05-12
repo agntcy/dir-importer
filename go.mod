@@ -8,7 +8,7 @@ require (
 	github.com/agntcy/dir/client v1.3.0
 	github.com/agntcy/dir/utils v1.3.0
 	github.com/agntcy/oasf-sdk/pkg v1.0.5
-	github.com/modelcontextprotocol/registry v1.7.6
+	github.com/modelcontextprotocol/registry v1.7.7
 	github.com/sashabaranov/go-openai v1.41.2
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	gopkg.in/yaml.v3 v3.0.1
