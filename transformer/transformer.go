@@ -17,11 +17,13 @@ import (
 )
 
 // Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
-type Transformer struct{}
+type Transformer struct {
+	debug bool
+}
 
 // NewTransformer creates a transformer for MCP, A2A, and Agent Skill pipeline items.
-func NewTransformer() *Transformer {
-	return &Transformer{}
+func NewTransformer(debug bool) *Transformer {
+	return &Transformer{debug: debug}
 }
 
 // runTransformStage runs the transformation stage with concurrent workers.
@@ -100,7 +102,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 			return nil, fmt.Errorf("failed to convert A2A card %s to OASF: %w", nv, err)
 		}
 
-		if record.GetData() != nil && record.Data.Fields != nil {
+		if t.debug && record.GetData() != nil && record.Data.Fields != nil {
 			if dbg, err := json.Marshal(item.A2A.AsMap()); err == nil {
 				record.Data.Fields["__a2a_debug_source"] = structpb.NewStringValue(string(dbg))
 			}
@@ -135,7 +137,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		}
 
 		// Attach MCP source for debugging push failures
-		if record.GetData() != nil && record.Data.Fields != nil {
+		if t.debug && record.GetData() != nil && record.Data.Fields != nil {
 			if mcpBytes, err := json.Marshal(item.MCP.Server); err == nil {
 				record.Data.Fields["__mcp_debug_source"] = structpb.NewStringValue(string(mcpBytes))
 			}

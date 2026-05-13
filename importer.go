@@ -19,6 +19,7 @@ import (
 	"github.com/agntcy/dir-importer/fetcher"
 	"github.com/agntcy/dir-importer/pusher"
 	"github.com/agntcy/dir-importer/scanner"
+	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/transformer"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
@@ -86,7 +87,7 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		client:      client,
 		fetcher:     fetch,
 		dedup:       d,
-		transformer: transformer.NewTransformer(),
+		transformer: transformer.NewTransformer(cfg.Debug),
 		enricher:    e,
 		scanner:     sc,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),
@@ -381,6 +382,9 @@ func writeRecords(outputDir string, recordsCh <-chan *corev1.Record) error {
 }
 
 func writeRecord(outputDir string, record *corev1.Record) error {
+	// Remove importer-only debug fields (e.g. __mcp_debug_source)
+	_ = shared.StripImportDebugFields(record)
+
 	cid := record.GetCid()
 	if cid == "" {
 		return errors.New("failed to derive CID for record")
