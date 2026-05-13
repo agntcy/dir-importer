@@ -24,10 +24,10 @@ const (
 
 // --- TransformRecord direct (per-kind) ---
 
-func TestTransformRecord_MCP_Success(t *testing.T) {
+func TestTransformRecord_MCP_Success_DebugOn(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(true)
 	item := types.MCPSourceItem(validMCP())
 
 	rec, err := tr.TransformRecord(item)
@@ -49,12 +49,34 @@ func TestTransformRecord_MCP_Success(t *testing.T) {
 	}
 }
 
+// Without --debug the transformer must NOT attach the importer-only debug
+// field, so produced records stay free of payload bloat and unknown-OASF-field
+// risk all the way through the pipeline.
+func TestTransformRecord_MCP_Success_DebugOff(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false)
+
+	rec, err := tr.TransformRecord(types.MCPSourceItem(validMCP()))
+	if err != nil {
+		t.Fatalf("TransformRecord: %v", err)
+	}
+
+	if rec == nil || rec.GetData() == nil {
+		t.Fatal("returned record has no data")
+	}
+
+	if _, ok := rec.GetData().GetFields()["__mcp_debug_source"]; ok {
+		t.Errorf("__mcp_debug_source must NOT be attached when debug=false: %+v", rec.GetData().GetFields())
+	}
+}
+
 func TestTransformRecord_MCP_TranslationError(t *testing.T) {
 	t.Parallel()
 
 	// A server with neither remotes nor packages is structurally invalid as
 	// far as the OASF translator is concerned (nothing to bind a runtime to).
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 	item := types.MCPSourceItem(mcpapiv0.ServerResponse{
 		Server: mcpapiv0.ServerJSON{
 			Name:    "io.test/empty",
@@ -72,10 +94,10 @@ func TestTransformRecord_MCP_TranslationError(t *testing.T) {
 	}
 }
 
-func TestTransformRecord_A2A_Success(t *testing.T) {
+func TestTransformRecord_A2A_Success_DebugOn(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(true)
 
 	card := validA2ACard(t)
 
@@ -94,10 +116,29 @@ func TestTransformRecord_A2A_Success(t *testing.T) {
 	}
 }
 
+func TestTransformRecord_A2A_Success_DebugOff(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false)
+
+	rec, err := tr.TransformRecord(types.A2ASourceItem(validA2ACard(t)))
+	if err != nil {
+		t.Fatalf("TransformRecord: %v", err)
+	}
+
+	if rec == nil || rec.GetData() == nil {
+		t.Fatal("returned record has no data")
+	}
+
+	if _, ok := rec.GetData().GetFields()["__a2a_debug_source"]; ok {
+		t.Errorf("__a2a_debug_source must NOT be attached when debug=false: %+v", rec.GetData().GetFields())
+	}
+}
+
 func TestTransformRecord_A2A_NilCard(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindA2A, A2A: nil})
 	if err == nil {
@@ -112,30 +153,33 @@ func TestTransformRecord_A2A_NilCard(t *testing.T) {
 func TestTransformRecord_AgentSkill_Success(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	// Agent-skill records must never carry a debug source field (server-side
+	// OASF validation rejects unknown fields on this type), regardless of
+	// whether --debug is enabled.
+	for _, debug := range []bool{false, true} {
+		tr := NewTransformer(debug)
 
-	skill := validAgentSkill(t)
+		skill := validAgentSkill(t)
 
-	rec, err := tr.TransformRecord(types.AgentSkillSourceItem(skill))
-	if err != nil {
-		t.Fatalf("TransformRecord: %v", err)
-	}
+		rec, err := tr.TransformRecord(types.AgentSkillSourceItem(skill))
+		if err != nil {
+			t.Fatalf("TransformRecord(debug=%v): %v", debug, err)
+		}
 
-	if rec == nil || rec.GetData() == nil {
-		t.Fatal("returned record has no data")
-	}
+		if rec == nil || rec.GetData() == nil {
+			t.Fatalf("returned record has no data (debug=%v)", debug)
+		}
 
-	// Agent-skill records must not carry a debug source field; server-side OASF
-	// validation rejects unknown fields on this type.
-	if _, ok := rec.GetData().GetFields()["__agentskill_debug_source"]; ok {
-		t.Error("agent-skill records must not carry __agentskill_debug_source")
+		if _, ok := rec.GetData().GetFields()["__agentskill_debug_source"]; ok {
+			t.Errorf("agent-skill records must not carry __agentskill_debug_source (debug=%v)", debug)
+		}
 	}
 }
 
 func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindAgentSkill, Skill: nil})
 	if err == nil {
@@ -150,7 +194,7 @@ func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 func TestTransformRecord_UnknownKind(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	// A SourceKind beyond the defined enum range should be rejected with a
 	// clear error rather than silently producing nil records.
@@ -169,7 +213,7 @@ func TestTransformRecord_UnknownKind(t *testing.T) {
 func TestTransform_PipelineHappyPath(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	in := make(chan types.SourceItem, 3)
 	in <- types.MCPSourceItem(validMCP())
@@ -210,7 +254,7 @@ func TestTransform_PipelineHappyPath(t *testing.T) {
 func TestTransform_PipelineMixedSuccessAndFailure(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	in := make(chan types.SourceItem, 2)
 	in <- types.MCPSourceItem(validMCP()) // ok
@@ -277,7 +321,7 @@ func TestTransform_PipelineMixedSuccessAndFailure(t *testing.T) {
 func TestTransform_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer()
+	tr := NewTransformer(false)
 
 	in := make(chan types.SourceItem) // unbuffered: producer blocks until cancellation
 	ctx, cancel := context.WithCancel(context.Background())
