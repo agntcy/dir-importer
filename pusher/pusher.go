@@ -12,6 +12,7 @@ import (
 
 	"github.com/agntcy/dir-importer/config"
 	"github.com/agntcy/dir-importer/internal/utils/logging"
+	"github.com/agntcy/dir-importer/shared"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -63,7 +64,7 @@ func (p *ClientPusher) Push(ctx context.Context, inputCh <-chan *corev1.Record) 
 		// even if some fail validation
 		for record := range inputCh {
 			// Extract and remove non-schema debug fields before push (DIR validates record data strictly).
-			debugSourceJSON := extractAndStripImportDebugFields(record)
+			debugSourceJSON := shared.StripImportDebugFields(record)
 
 			ref, err := p.client.Push(ctx, record)
 			if err != nil {
@@ -95,41 +96,6 @@ func (p *ClientPusher) Push(ctx context.Context, inputCh <-chan *corev1.Record) 
 	}()
 
 	return refCh, errCh
-}
-
-// extractAndStripImportDebugFields removes importer-only fields that are not part of the OASF
-// record schema. Returns combined text for stderr debug on push failure.
-func extractAndStripImportDebugFields(record *corev1.Record) string {
-	data := record.GetData()
-	if data == nil || data.GetFields() == nil {
-		return ""
-	}
-
-	fields := data.GetFields()
-
-	var parts []string
-
-	if v, ok := fields["__mcp_debug_source"]; ok {
-		parts = append(parts, "MCP server JSON:\n"+v.GetStringValue())
-
-		delete(fields, "__mcp_debug_source")
-	}
-
-	if v, ok := fields["__a2a_debug_source"]; ok {
-		parts = append(parts, "A2A AgentCard JSON:\n"+v.GetStringValue())
-
-		delete(fields, "__a2a_debug_source")
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	if len(parts) == 1 {
-		return parts[0]
-	}
-
-	return parts[0] + "\n\n" + parts[1]
 }
 
 // handlePushError handles push errors and sends them to the error channel.

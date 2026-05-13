@@ -1044,3 +1044,82 @@ func TestWriteRecords_MkdirFails(t *testing.T) {
 		t.Errorf("error %q does not match expected prefix", err.Error())
 	}
 }
+
+// writeRecord must remove importer-only debug fields before computing the
+// CID and marshaling, so dry-run output is consumable by the server (which
+// rejects unknown OASF fields) and the filename CID matches the CID of the
+// stripped record.
+func TestWriteRecords_StripsImportDebugFields(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+
+	// Record that mimics what the transformer emits for MCP and A2A sources:
+	// real OASF fields plus the importer-only __*_debug_source side-channels.
+	r := recordWithFields(map[string]string{
+		fieldName:            "srv",
+		"version":            "1.0.0",
+		"__mcp_debug_source": `{"name":"srv","version":"1.0.0"}`,
+		"__a2a_debug_source": `{"name":"srv","version":"1.0.0"}`,
+	})
+
+	// Snapshot the CID we expect on disk: the CID computed AFTER stripping
+	// the debug fields. We compute it here on a separate record with the
+	// same surviving fields so that the assertion documents the contract
+	// rather than tautologically re-deriving from the mutated record.
+	expected := recordWithFields(map[string]string{
+		fieldName: "srv",
+		"version": "1.0.0",
+	})
+	expectedCID := expected.GetCid()
+
+	if expectedCID == "" {
+		t.Fatal("test setup: expected CID is empty")
+	}
+
+	ch := make(chan *corev1.Record, 1)
+	ch <- r
+
+	close(ch)
+
+	if err := writeRecords(dir, ch); err != nil {
+		t.Fatalf("writeRecords: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("got %d files, want 1", len(entries))
+	}
+
+	wantName := expectedCID + ".record.json"
+	if entries[0].Name() != wantName {
+		t.Errorf("filename = %q, want %q (CID must be computed AFTER stripping debug fields)", entries[0].Name(), wantName)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v\n%s", err, string(data))
+	}
+
+	for _, banned := range []string{"__mcp_debug_source", "__a2a_debug_source"} {
+		if _, ok := decoded[banned]; ok {
+			t.Errorf("written file contains importer-only field %q: %v", banned, decoded)
+		}
+	}
+
+	// Real fields must survive stripping.
+	for _, want := range []string{fieldName, "version"} {
+		if _, ok := decoded[want]; !ok {
+			t.Errorf("written file is missing OASF field %q: %v", want, decoded)
+		}
+	}
+}

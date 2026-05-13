@@ -10,6 +10,50 @@ import (
 	corev1 "github.com/agntcy/dir/api/core/v1"
 )
 
+// Importer-only field names that the transformer attaches to records for
+// debugging push-time failures. They are NOT part of the OASF schema and
+// must be stripped before a record is persisted (push or dry-run write).
+const (
+	MCPDebugSourceField = "__mcp_debug_source"
+	A2ADebugSourceField = "__a2a_debug_source"
+)
+
+// StripImportDebugFields removes importer-only debug fields from the record's
+// data and returns a human-readable, multi-line summary of what was stripped
+// (suitable for stderr debug output on push failure). It returns an empty
+// string if no debug fields were present.
+func StripImportDebugFields(record *corev1.Record) string {
+	data := record.GetData()
+	if data == nil || data.GetFields() == nil {
+		return ""
+	}
+
+	fields := data.GetFields()
+
+	var parts []string
+
+	if v, ok := fields[MCPDebugSourceField]; ok {
+		parts = append(parts, "MCP server JSON:\n"+v.GetStringValue())
+
+		delete(fields, MCPDebugSourceField)
+	}
+
+	if v, ok := fields[A2ADebugSourceField]; ok {
+		parts = append(parts, "A2A AgentCard JSON:\n"+v.GetStringValue())
+
+		delete(fields, A2ADebugSourceField)
+	}
+
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	default:
+		return parts[0] + "\n\n" + parts[1]
+	}
+}
+
 // ExtractNameVersion extracts "name@version" from a record.
 func ExtractNameVersion(record *corev1.Record) (string, error) {
 	if record == nil || record.GetData() == nil {
