@@ -11,6 +11,13 @@ import (
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
+	"github.com/agntcy/dir-importer/enricher/toolhost"
+)
+
+const (
+	testModel       = "azure:gpt-4o"
+	testCommand     = "dirctl"
+	dirMCPServerKey = "dir-mcp-server"
 )
 
 func writeFile(t *testing.T, name, contents string) string {
@@ -24,29 +31,56 @@ func writeFile(t *testing.T, name, contents string) string {
 	return path
 }
 
-func TestValidate_ConfigFile(t *testing.T) {
-	t.Parallel()
+// validToolHost returns a [toolhost.Config] that passes its own Validate(),
+// so each enricher-config test can focus on the field under test instead of
+// reconstructing a full tool-host fixture per case.
+func validToolHost() toolhost.Config {
+	return toolhost.Config{
+		Model: testModel,
+		MCPServers: map[string]toolhost.MCPServerConfig{
+			dirMCPServerKey: {
+				Command: testCommand,
+				Args:    []string{"mcp", "serve"},
+			},
+		},
+		MaxSteps: 10,
+	}
+}
 
-	validConfig := writeFile(t, "enricher.json", `{}`)
+// Validate delegates the tool-host check to toolhost.Config.Validate(); a
+// broken ToolHost must surface as an enricher-config validation failure
+// (no silent acceptance, no panic deeper in toolhost.New).
+func TestValidate_DelegatesToolHostValidation(t *testing.T) {
+	t.Parallel()
 
 	tests := []struct {
 		name        string
-		configFile  string
+		toolHost    toolhost.Config
 		wantErrText string
 	}{
 		{
-			name:        "empty path is rejected",
-			configFile:  "",
-			wantErrText: "config file is required",
+			name:        "valid tool host passes",
+			toolHost:    validToolHost(),
+			wantErrText: "",
 		},
 		{
-			name:        "missing path is rejected",
-			configFile:  "/nonexistent/enricher.json",
-			wantErrText: "config file not found",
+			name: "missing model is rejected by tool host",
+			toolHost: toolhost.Config{
+				MCPServers: map[string]toolhost.MCPServerConfig{
+					dirMCPServerKey: {Command: testCommand},
+				},
+			},
+			wantErrText: "model is required",
 		},
 		{
-			name:       "existing path passes the file-existence check",
-			configFile: validConfig,
+			name: "missing dir-mcp-server entry is rejected by tool host",
+			toolHost: toolhost.Config{
+				Model: testModel,
+				MCPServers: map[string]toolhost.MCPServerConfig{
+					"other-server": {Command: testCommand},
+				},
+			},
+			wantErrText: `mcpServers must include "dir-mcp-server"`,
 		},
 	}
 
@@ -55,7 +89,7 @@ func TestValidate_ConfigFile(t *testing.T) {
 			t.Parallel()
 
 			cfg := enricherconfig.Config{
-				ConfigFile:        tt.configFile,
+				ToolHost:          tt.toolHost,
 				RequestsPerMinute: 1,
 			}
 
@@ -86,7 +120,7 @@ func TestPrompts_DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
 	cfg := enricherconfig.Config{
-		ConfigFile:        writeFile(t, "enricher.json", `{}`),
+		ToolHost:          validToolHost(),
 		RequestsPerMinute: 1,
 	}
 
@@ -122,7 +156,7 @@ func TestPrompts_LoadCustomFromDisk(t *testing.T) {
 	domainsPath := writeFile(t, "domains.md", domainsBody)
 
 	cfg := enricherconfig.Config{
-		ConfigFile:            writeFile(t, "enricher.json", `{}`),
+		ToolHost:              validToolHost(),
 		SkillsPromptTemplate:  skillsPath,
 		DomainsPromptTemplate: domainsPath,
 		RequestsPerMinute:     1,
@@ -180,7 +214,7 @@ func TestValidate_RejectsMissingPromptTemplateFile(t *testing.T) {
 			t.Parallel()
 
 			cfg := enricherconfig.Config{
-				ConfigFile:        writeFile(t, "enricher.json", `{}`),
+				ToolHost:          validToolHost(),
 				RequestsPerMinute: 1,
 			}
 			tt.mutate(&cfg)
@@ -228,7 +262,7 @@ func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 			t.Parallel()
 
 			cfg := enricherconfig.Config{
-				ConfigFile:        writeFile(t, "enricher.json", `{}`),
+				ToolHost:          validToolHost(),
 				RequestsPerMinute: 1,
 			}
 			tt.mutate(t, &cfg)
@@ -373,7 +407,7 @@ func TestValidate_RequestsPerMinuteMustBePositive(t *testing.T) {
 			t.Parallel()
 
 			cfg := enricherconfig.Config{
-				ConfigFile:        writeFile(t, "enricher.json", `{}`),
+				ToolHost:          validToolHost(),
 				RequestsPerMinute: tt.requestsPerMinute,
 			}
 
