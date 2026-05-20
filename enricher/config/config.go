@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 )
 
 // Default values for enricher configuration.
@@ -29,10 +31,18 @@ type Config struct {
 	SkillsPromptTemplate  string // Path to custom skills prompt template file (empty = embedded default)
 	DomainsPromptTemplate string // Path to custom domains prompt template file (empty = embedded default)
 	RequestsPerMinute     int    // Maximum LLM API requests per minute (to avoid rate limit errors)
+
+	SkipEnricher bool              // SkipEnricher bypasses LLM-based enrichment entirely.
+	Skills       []*typesv1.Skill  // OASF skill taxonomy entries assigned to every record when SkipEnricher is true.
+	Domains      []*typesv1.Domain // OASF domain taxonomy entries assigned to every record when SkipEnricher is true.
 }
 
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
+	if c.SkipEnricher {
+		return c.validateSkipEnricher()
+	}
+
 	if c.ConfigFile == "" {
 		return errors.New("config file is required")
 	}
@@ -83,6 +93,32 @@ func validatePromptTemplate(label, path string) error {
 
 	if strings.TrimSpace(string(data)) == "" {
 		return fmt.Errorf("%s prompt template is empty", label)
+	}
+
+	return nil
+}
+
+// validateSkipEnricher enforces that every taxonomy entry carries at least
+// one identifier (name or id).
+func (c *Config) validateSkipEnricher() error {
+	for i, s := range c.Skills {
+		if s == nil {
+			return fmt.Errorf("skills[%d]: nil entry", i)
+		}
+
+		if s.GetName() == "" && s.GetId() == 0 {
+			return fmt.Errorf("skills[%d]: at least one of name or id must be set", i)
+		}
+	}
+
+	for i, d := range c.Domains {
+		if d == nil {
+			return fmt.Errorf("domains[%d]: nil entry", i)
+		}
+
+		if d.GetName() == "" && d.GetId() == 0 {
+			return fmt.Errorf("domains[%d]: at least one of name or id must be set", i)
+		}
 	}
 
 	return nil

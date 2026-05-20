@@ -68,8 +68,8 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 
 	var e types.Enricher
 
-	if cfg.EnricherOverride != nil {
-		e = cfg.EnricherOverride
+	if cfg.Enricher.SkipEnricher {
+		e = enricher.NewStaticEnricher(cfg.Enricher.Skills, cfg.Enricher.Domains)
 	} else {
 		e, err = enricher.New(ctx, cfg.Enricher)
 		if err != nil {
