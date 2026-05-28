@@ -1,11 +1,11 @@
 module github.com/agntcy/dir-importer
 
-go 1.26.2
+go 1.26.3
 
 require (
 	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.11-20260427075301-21bf512e44c9.1
-	github.com/agntcy/dir/api v1.3.0
-	github.com/agntcy/dir/client v1.3.0
+	github.com/agntcy/dir/api v1.4.0
+	github.com/agntcy/dir/client v1.4.0
 	github.com/agntcy/oasf-sdk/pkg v1.0.5
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/modelcontextprotocol/registry v1.7.9
@@ -22,7 +22,7 @@ require (
 require (
 	buf.build/gen/go/agntcy/oasf-sdk/protocolbuffers/go v1.36.11-20260427074745-7826cb0d66b9.1 // indirect
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
-	github.com/Masterminds/semver/v3 v3.4.0 // indirect
+	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ipfs/go-cid v0.6.1 // indirect
@@ -42,8 +42,8 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
