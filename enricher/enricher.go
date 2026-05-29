@@ -52,6 +52,16 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 		return nil, fmt.Errorf("enricher config: %w", err)
 	}
 
+	skillsPrompt, err := cfg.SkillsPrompt()
+	if err != nil {
+		return nil, fmt.Errorf("enricher config: %w", err)
+	}
+
+	domainsPrompt, err := cfg.DomainsPrompt()
+	if err != nil {
+		return nil, fmt.Errorf("enricher config: %w", err)
+	}
+
 	th, err := toolhost.NewFromConfigFile(ctx, cfg.ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("enricher tool host: %w", err)
@@ -59,8 +69,8 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 
 	return &Enricher{
 		toolHost:       th,
-		skillsPrompt:   cfg.SkillsPromptTemplate,
-		domainsPrompt:  cfg.DomainsPromptTemplate,
+		skillsPrompt:   skillsPrompt,
+		domainsPrompt:  domainsPrompt,
 		requestLimiter: rate.NewLimiter(rate.Limit(float64(cfg.RequestsPerMinute)/60.0), 1), //nolint:mnd
 	}, nil
 }
