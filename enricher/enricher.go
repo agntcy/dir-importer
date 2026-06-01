@@ -263,7 +263,28 @@ func setStructSkills(s *structpb.Struct, skills []*typesv1.Skill) error {
 		return errors.New("record struct has no fields")
 	}
 
+	s.Fields["skills"] = structpb.NewListValue(skillsToListValue(skills))
+
+	return nil
+}
+
+func setStructDomains(s *structpb.Struct, domains []*typesv1.Domain) error {
+	if s.Fields == nil {
+		return errors.New("record struct has no fields")
+	}
+
+	s.Fields["domains"] = structpb.NewListValue(domainsToListValue(domains))
+
+	return nil
+}
+
+// skillsToListValue / domainsToListValue centralize the name/id omission
+// rules so the LLM-driven enricher and the static-enrichment path produce
+// wire-identical output. Name is omitted when empty, Id when zero; nil
+// entries are tolerated via proto's nil-safe getters.
+func skillsToListValue(skills []*typesv1.Skill) *structpb.ListValue {
 	lv := &structpb.ListValue{Values: make([]*structpb.Value, 0, len(skills))}
+
 	for _, sk := range skills {
 		st := &structpb.Struct{Fields: map[string]*structpb.Value{}}
 		if sk.GetName() != "" {
@@ -277,17 +298,12 @@ func setStructSkills(s *structpb.Struct, skills []*typesv1.Skill) error {
 		lv.Values = append(lv.Values, structpb.NewStructValue(st))
 	}
 
-	s.Fields["skills"] = structpb.NewListValue(lv)
-
-	return nil
+	return lv
 }
 
-func setStructDomains(s *structpb.Struct, domains []*typesv1.Domain) error {
-	if s.Fields == nil {
-		return errors.New("record struct has no fields")
-	}
-
+func domainsToListValue(domains []*typesv1.Domain) *structpb.ListValue {
 	lv := &structpb.ListValue{Values: make([]*structpb.Value, 0, len(domains))}
+
 	for _, d := range domains {
 		st := &structpb.Struct{Fields: map[string]*structpb.Value{}}
 		if d.GetName() != "" {
@@ -301,7 +317,5 @@ func setStructDomains(s *structpb.Struct, domains []*typesv1.Domain) error {
 		lv.Values = append(lv.Values, structpb.NewStructValue(st))
 	}
 
-	s.Fields["domains"] = structpb.NewListValue(lv)
-
-	return nil
+	return lv
 }

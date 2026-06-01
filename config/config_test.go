@@ -4,13 +4,12 @@
 package config_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
+	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	importerconfig "github.com/agntcy/dir-importer/config"
-	"github.com/agntcy/dir-importer/types"
-	corev1 "github.com/agntcy/dir/api/core/v1"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 )
 
 const (
@@ -18,16 +17,17 @@ const (
 	testFilePath        = "/some/path.json"
 )
 
-type stubEnricher struct{}
-
-func (stubEnricher) Enrich(_ context.Context, _ <-chan *corev1.Record, _ *types.Result) (<-chan *corev1.Record, <-chan error) {
-	return nil, nil
+// skipEnricher is the minimum [enricherconfig.Config] that passes Validate()
+// without an LLM: it short-circuits the tool-host / template / rate-limit
+// checks, letting these tests focus on the importer-level fields under test
+// (Type, FilePath, RegistryURL) instead of reconstructing a full LLM config
+// per case.
+func skipEnricher() enricherconfig.Config {
+	return enricherconfig.Config{SkipEnricher: true}
 }
 
 func TestValidate_TypeDispatch(t *testing.T) {
 	t.Parallel()
-
-	override := stubEnricher{}
 
 	tests := []struct {
 		name        string
@@ -36,79 +36,79 @@ func TestValidate_TypeDispatch(t *testing.T) {
 	}{
 		{
 			name:        "empty type is rejected",
-			cfg:         importerconfig.Config{EnricherOverride: override},
+			cfg:         importerconfig.Config{Enricher: skipEnricher()},
 			wantErrText: "import type is required",
 		},
 		{
 			name: "unsupported type is rejected",
 			cfg: importerconfig.Config{
-				Type:             "made-up",
-				EnricherOverride: override,
+				Type:     "made-up",
+				Enricher: skipEnricher(),
 			},
 			wantErrText: "unsupported import type",
 		},
 		{
 			name: "mcp-registry without RegistryURL is rejected",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeMCPRegistry,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeMCPRegistry,
+				Enricher: skipEnricher(),
 			},
 			wantErrText: "registry URL is required",
 		},
 		{
 			name: "mcp-registry with RegistryURL is accepted",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeMCPRegistry,
-				RegistryURL:      "https://example.invalid/v0",
-				EnricherOverride: override,
+				Type:        importerconfig.ImportTypeMCPRegistry,
+				RegistryURL: "https://example.invalid/v0",
+				Enricher:    skipEnricher(),
 			},
 		},
 		{
 			name: "mcp file import without FilePath is rejected",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeMCP,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeMCP,
+				Enricher: skipEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
 		{
 			name: "a2a file import without FilePath is rejected",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeA2A,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeA2A,
+				Enricher: skipEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
 		{
 			name: "agent-skill import without FilePath is rejected",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeAgentSkill,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeAgentSkill,
+				Enricher: skipEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
 		{
 			name: "mcp file import with FilePath is accepted",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeMCP,
-				FilePath:         testFilePath,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeMCP,
+				FilePath: testFilePath,
+				Enricher: skipEnricher(),
 			},
 		},
 		{
 			name: "a2a file import with FilePath is accepted",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeA2A,
-				FilePath:         testFilePath,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeA2A,
+				FilePath: testFilePath,
+				Enricher: skipEnricher(),
 			},
 		},
 		{
 			name: "agent-skill import with FilePath is accepted",
 			cfg: importerconfig.Config{
-				Type:             importerconfig.ImportTypeAgentSkill,
-				FilePath:         testFilePath,
-				EnricherOverride: override,
+				Type:     importerconfig.ImportTypeAgentSkill,
+				FilePath: testFilePath,
+				Enricher: skipEnricher(),
 			},
 		},
 	}
@@ -137,26 +137,30 @@ func TestValidate_TypeDispatch(t *testing.T) {
 	}
 }
 
-// EnricherOverride must short-circuit Enricher.Validate(). Without the override,
-// the zero-value enricher config would fail validation (no ConfigFile set),
-// proving the short-circuit when Validate succeeds.
-func TestValidate_EnricherOverrideShortCircuitsEnricherValidation(t *testing.T) {
+// SkipEnricher must let the importer-level Validate succeed without an LLM
+// configuration; the static-enrichment path doesn't use a tool host. The
+// matching un-skipped config (with the same empty ToolHost) must fail, to
+// prove the short-circuit is doing the work.
+func TestValidate_SkipEnricherShortCircuitsLLMConfig(t *testing.T) {
 	t.Parallel()
 
-	cfgWithoutOverride := importerconfig.Config{
+	cfgWithoutSkip := importerconfig.Config{
 		Type:     importerconfig.ImportTypeMCP,
 		FilePath: testFilePath,
 	}
-	if err := cfgWithoutOverride.Validate(); err == nil {
-		t.Fatal("expected enricher config validation to fail without EnricherOverride, got nil")
+	if err := cfgWithoutSkip.Validate(); err == nil {
+		t.Fatal("expected enricher config validation to fail without SkipEnricher, got nil")
 	}
 
-	cfgWithOverride := importerconfig.Config{
-		Type:             importerconfig.ImportTypeMCP,
-		FilePath:         testFilePath,
-		EnricherOverride: stubEnricher{},
+	cfgWithSkip := importerconfig.Config{
+		Type:     importerconfig.ImportTypeMCP,
+		FilePath: testFilePath,
+		Enricher: enricherconfig.Config{
+			SkipEnricher: true,
+			Skills:       []*typesv1.Skill{{Name: "skill-a", Id: 1}},
+		},
 	}
-	if err := cfgWithOverride.Validate(); err != nil {
-		t.Fatalf("expected EnricherOverride to bypass enricher validation, got %v", err)
+	if err := cfgWithSkip.Validate(); err != nil {
+		t.Fatalf("expected SkipEnricher to bypass LLM validation, got %v", err)
 	}
 }

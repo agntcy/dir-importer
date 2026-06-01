@@ -8,23 +8,35 @@ import (
 	"testing"
 	"time"
 
+	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func TestNewStaticEnricher(t *testing.T) {
-	t.Parallel()
-
-	if NewStaticEnricher() == nil {
-		t.Fatal("NewStaticEnricher returned nil")
-	}
+// newStaticEnricherFixture builds a StaticEnricher with arbitrary but
+// representative OASF taxonomy values. Behavior tests below don't depend on
+// the specific values — they just need *some* skill/domain on every output
+// record to verify the enricher's pipeline mechanics (forwarding, context
+// cancellation, error handling). Concrete-value semantics are covered
+// separately in the TestNewStaticEnricher_* assignment tests.
+func newStaticEnricherFixture() *StaticEnricher {
+	return NewStaticEnricher(
+		[]*typesv1.Skill{{
+			Name: "natural_language_processing/natural_language_understanding/contextual_comprehension",
+			Id:   10101, //nolint:mnd
+		}},
+		[]*typesv1.Domain{{
+			Name: "technology/software_engineering",
+			Id:   102, //nolint:mnd
+		}},
+	)
 }
 
 func TestStaticEnricher_Enrich_HappyPath(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("agent-1"),
@@ -69,7 +81,7 @@ func TestStaticEnricher_Enrich_HappyPath(t *testing.T) {
 func TestStaticEnricher_Enrich_PreservesExistingFields(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("preserve-me"),
@@ -98,7 +110,7 @@ func TestStaticEnricher_Enrich_PreservesExistingFields(t *testing.T) {
 func TestStaticEnricher_Enrich_NilData_Errors(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	in := make(chan *corev1.Record, 1)
 	in <- &corev1.Record{Data: nil}
@@ -127,7 +139,7 @@ func TestStaticEnricher_Enrich_NilFields_Errors(t *testing.T) {
 
 	// A non-nil Data with a nil Fields map should be rejected too — without
 	// a Fields map the static skills/domains have nowhere to land.
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	in := make(chan *corev1.Record, 1)
 	in <- &corev1.Record{Data: &structpb.Struct{Fields: nil}}
@@ -150,7 +162,7 @@ func TestStaticEnricher_Enrich_NilFields_Errors(t *testing.T) {
 func TestStaticEnricher_Enrich_MultipleRecords(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	const n = 5
 
@@ -183,7 +195,7 @@ func TestStaticEnricher_Enrich_MultipleRecords(t *testing.T) {
 func TestStaticEnricher_Enrich_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	in := make(chan *corev1.Record)
 
@@ -220,7 +232,7 @@ func TestStaticEnricher_Enrich_StopsOnFirstError(t *testing.T) {
 
 	// Enrich closes its output after the first nil-data error so downstream
 	// stages get no further records from a degraded enricher.
-	se := NewStaticEnricher()
+	se := newStaticEnricherFixture()
 
 	in := make(chan *corev1.Record, 2)
 	in <- &corev1.Record{Data: nil} // bad first
@@ -238,6 +250,136 @@ func TestStaticEnricher_Enrich_StopsOnFirstError(t *testing.T) {
 
 	if len(errs) != 1 {
 		t.Errorf("got %d errors, want 1", len(errs))
+	}
+}
+
+func TestNewStaticEnricher_AssignsCallerSuppliedEntries(t *testing.T) {
+	t.Parallel()
+
+	se := NewStaticEnricher(
+		[]*typesv1.Skill{
+			{Name: "skill-a", Id: 1},
+			{Name: "skill-b", Id: 2},
+		},
+		[]*typesv1.Domain{
+			{Name: testDomainA, Id: 10},
+		},
+	)
+
+	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
+		fieldName: structpb.NewStringValue("agent-1"),
+	}}}
+
+	in := make(chan *corev1.Record, 1)
+	in <- rec
+
+	close(in)
+
+	out, errCh := se.Enrich(context.Background(), in, &types.Result{})
+	drainErrCh(errCh)
+
+	got := <-out
+
+	skills := got.GetData().GetFields()["skills"].GetListValue().GetValues()
+	if len(skills) != 2 {
+		t.Fatalf("skills: got %d entries, want 2", len(skills))
+	}
+
+	first := skills[0].GetStructValue().GetFields()
+	if first["name"].GetStringValue() != "skill-a" || first["id"].GetNumberValue() != 1 {
+		t.Errorf("skills[0] = %+v", first)
+	}
+
+	domains := got.GetData().GetFields()["domains"].GetListValue().GetValues()
+	if len(domains) != 1 {
+		t.Fatalf("domains: got %d entries, want 1", len(domains))
+	}
+
+	if domains[0].GetStructValue().GetFields()["name"].GetStringValue() != testDomainA {
+		t.Errorf("domains[0] = %+v", domains[0])
+	}
+}
+
+// Empty input slices must produce an explicit empty list on every record —
+// not nil and not "leave the field alone". Downstream consumers rely on
+// the field always being present after the enricher stage runs.
+func TestNewStaticEnricher_NilInputs_ProduceEmptyLists(t *testing.T) {
+	t.Parallel()
+
+	se := NewStaticEnricher(nil, nil)
+
+	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
+		fieldName: structpb.NewStringValue("agent-1"),
+		"skills":  structpb.NewStringValue("stale"),
+		"domains": structpb.NewStringValue("stale"),
+	}}}
+
+	in := make(chan *corev1.Record, 1)
+	in <- rec
+
+	close(in)
+
+	out, errCh := se.Enrich(context.Background(), in, &types.Result{})
+	drainErrCh(errCh)
+
+	got := <-out
+
+	skills := got.GetData().GetFields()["skills"].GetListValue()
+	if skills == nil {
+		t.Fatal("skills field should be a list value, got nil")
+	}
+
+	if len(skills.GetValues()) != 0 {
+		t.Errorf("skills should be empty, got %d entries", len(skills.GetValues()))
+	}
+
+	domains := got.GetData().GetFields()["domains"].GetListValue()
+	if domains == nil {
+		t.Fatal("domains field should be a list value, got nil")
+	}
+
+	if len(domains.GetValues()) != 0 {
+		t.Errorf("domains should be empty, got %d entries", len(domains.GetValues()))
+	}
+}
+
+// Mirrors setStructSkills' omission rules: empty Name and zero Id must not
+// be written as struct keys. Keeping the rules identical to the LLM path
+// means a record enriched by the static path is indistinguishable on the
+// wire from one enriched by the LLM path — both paths route through
+// skillsToListValue/domainsToListValue.
+func TestNewStaticEnricher_OmitsEmptyNameAndZeroID(t *testing.T) {
+	t.Parallel()
+
+	se := NewStaticEnricher(
+		[]*typesv1.Skill{
+			{Name: "named-only"},
+			{Id: 99},
+		},
+		nil,
+	)
+
+	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{}}}
+
+	in := make(chan *corev1.Record, 1)
+	in <- rec
+
+	close(in)
+
+	out, errCh := se.Enrich(context.Background(), in, &types.Result{})
+	drainErrCh(errCh)
+
+	got := <-out
+	skills := got.GetData().GetFields()["skills"].GetListValue().GetValues()
+
+	first := skills[0].GetStructValue().GetFields()
+	if _, ok := first["id"]; ok {
+		t.Errorf("name-only entry should omit id key, got %+v", first)
+	}
+
+	second := skills[1].GetStructValue().GetFields()
+	if _, ok := second["name"]; ok {
+		t.Errorf("id-only entry should omit name key, got %+v", second)
 	}
 }
 

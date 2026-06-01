@@ -11,7 +11,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-const fieldName = "name"
+const (
+	fieldName   = "name"
+	testDomainA = "domain-a"
+)
 
 func TestParseSkillsJSON_HappyPath(t *testing.T) {
 	t.Parallel()
@@ -248,7 +251,7 @@ func TestSetStructDomains_HappyPath(t *testing.T) {
 
 	s := &structpb.Struct{Fields: map[string]*structpb.Value{}}
 	domains := []*typesv1.Domain{
-		{Name: "domain-a", Id: 11},
+		{Name: testDomainA, Id: 11},
 		{Name: "domain-b", Id: 22},
 	}
 
@@ -261,7 +264,7 @@ func TestSetStructDomains_HappyPath(t *testing.T) {
 		t.Fatalf("unexpected domains: %+v", got)
 	}
 
-	if got.GetValues()[0].GetStructValue().GetFields()["name"].GetStringValue() != "domain-a" {
+	if got.GetValues()[0].GetStructValue().GetFields()["name"].GetStringValue() != testDomainA {
 		t.Errorf("first domain name = %+v", got.GetValues()[0])
 	}
 }

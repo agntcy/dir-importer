@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 )
 
@@ -237,6 +238,119 @@ func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantErrText, err)
 			}
 		})
+	}
+}
+
+// SkipEnricher must bypass the tool-host / prompt-template / rate-limit
+// checks: those fields are unused on the static-enrichment path, and
+// requiring them would force callers to configure an LLM they never call.
+func TestValidate_SkipEnricher_BypassesLLMConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := enricherconfig.Config{
+		SkipEnricher: true,
+		Skills:       []*typesv1.Skill{{Name: "skill-a", Id: 1}},
+		Domains:      []*typesv1.Domain{{Name: "domain-a", Id: 2}},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	if cfg.SkillsPromptTemplate != "" {
+		t.Errorf("prompt templates should not be populated on the skip path, got %q", cfg.SkillsPromptTemplate)
+	}
+}
+
+// Empty Skills + Domains are valid on the skip path. The static enricher
+// will assign empty lists to every record; that's a deterministic and
+// well-defined outcome, not a misconfiguration.
+func TestValidate_SkipEnricher_AllowsEmptyLists(t *testing.T) {
+	t.Parallel()
+
+	cfg := enricherconfig.Config{SkipEnricher: true}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// An entry with neither Name nor Id would silently produce an empty struct
+// in the record, which downstream OASF consumers reject in confusing ways.
+// Validate must catch this at config time, including nil pointer entries.
+func TestValidate_SkipEnricher_RejectsEntriesWithoutIdentifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		cfg         enricherconfig.Config
+		wantErrText string
+	}{
+		{
+			name: "skill with empty name and zero id",
+			cfg: enricherconfig.Config{
+				SkipEnricher: true,
+				Skills:       []*typesv1.Skill{{Name: "ok", Id: 1}, {}},
+			},
+			wantErrText: "skills[1]",
+		},
+		{
+			name: "domain with empty name and zero id",
+			cfg: enricherconfig.Config{
+				SkipEnricher: true,
+				Domains:      []*typesv1.Domain{{}, {Name: "ok"}},
+			},
+			wantErrText: "domains[0]",
+		},
+		{
+			name: "nil skill pointer is rejected",
+			cfg: enricherconfig.Config{
+				SkipEnricher: true,
+				Skills:       []*typesv1.Skill{nil},
+			},
+			wantErrText: "skills[0]: nil entry",
+		},
+		{
+			name: "nil domain pointer is rejected",
+			cfg: enricherconfig.Config{
+				SkipEnricher: true,
+				Domains:      []*typesv1.Domain{nil},
+			},
+			wantErrText: "domains[0]: nil entry",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErrText, err)
+			}
+		})
+	}
+}
+
+// Name-only or Id-only entries are valid: the CLI's --skill <name|id> flag
+// is documented to accept either, so the library must accept both.
+func TestValidate_SkipEnricher_AcceptsEntriesWithEitherIdentifier(t *testing.T) {
+	t.Parallel()
+
+	cfg := enricherconfig.Config{
+		SkipEnricher: true,
+		Skills: []*typesv1.Skill{
+			{Name: "name-only"},
+			{Id: 42},
+		},
+		Domains: []*typesv1.Domain{
+			{Name: "domain-name-only"},
+			{Id: 7},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 
