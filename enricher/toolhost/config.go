@@ -4,16 +4,18 @@
 package toolhost
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 )
 
 // dirMCPServerKey is the only MCP server entry the enricher uses (stdio to dir MCP).
 const dirMCPServerKey = "dir-mcp-server"
 
-// FileConfig is the enricher JSON config (model, MCP servers, tool loop limits).
-type FileConfig struct {
+// defaultMaxSteps is the fallback tool-loop limit applied when callers leave [Config.MaxSteps] unset.
+const defaultMaxSteps = 10
+
+// Config is the tool-host configuration (model, MCP servers, tool-loop limits).
+type Config struct {
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
 	Model      string                     `json:"model"`
 	MaxSteps   int                        `json:"max-steps"`
@@ -26,46 +28,40 @@ type MCPServerConfig struct {
 	Env     map[string]any `json:"env,omitempty"`
 }
 
-// LoadFileConfig reads and parses the enricher config file.
-func LoadFileConfig(path string) (*FileConfig, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read enricher config: %w", err)
+// Validate checks the configuration and fills in defaults.
+func (c *Config) Validate() error {
+	if c == nil {
+		return errors.New("toolhost config: nil")
 	}
 
-	var cfg FileConfig
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return nil, fmt.Errorf("parse enricher config: %w", err)
+	if c.Model == "" {
+		return errors.New("toolhost config: model is required")
 	}
 
-	if cfg.Model == "" {
-		return nil, fmt.Errorf("enricher config: model is required")
+	if _, err := c.dirMCPServer(); err != nil {
+		return err
 	}
 
-	if _, err := cfg.DirMCPServer(); err != nil {
-		return nil, err
+	if c.MaxSteps <= 0 {
+		c.MaxSteps = defaultMaxSteps
 	}
 
-	if cfg.MaxSteps <= 0 {
-		cfg.MaxSteps = 10
-	}
-
-	return &cfg, nil
+	return nil
 }
 
-// DirMCPServer returns the required dir MCP stdio server; other mcpServers keys are ignored.
-func (c *FileConfig) DirMCPServer() (*MCPServerConfig, error) {
+// dirMCPServer returns the required dir MCP stdio server; other mcpServers keys are ignored.
+func (c *Config) dirMCPServer() (*MCPServerConfig, error) {
 	if c == nil {
-		return nil, fmt.Errorf("enricher config: nil")
+		return nil, errors.New("toolhost config: nil")
 	}
 
 	s, ok := c.MCPServers[dirMCPServerKey]
 	if !ok {
-		return nil, fmt.Errorf("enricher config: mcpServers must include %q", dirMCPServerKey)
+		return nil, fmt.Errorf("toolhost config: mcpServers must include %q", dirMCPServerKey)
 	}
 
 	if s.Command == "" {
-		return nil, fmt.Errorf("enricher config: mcpServers[%q].command is required", dirMCPServerKey)
+		return nil, fmt.Errorf("toolhost config: mcpServers[%q].command is required", dirMCPServerKey)
 	}
 
 	return &s, nil

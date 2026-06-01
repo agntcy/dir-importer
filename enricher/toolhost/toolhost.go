@@ -25,14 +25,13 @@ type Host struct {
 	maxSteps  int
 }
 
-// NewFromConfigFile loads enricher JSON, starts the MCP stdio server, and prepares the LLM client.
-func NewFromConfigFile(ctx context.Context, configPath string) (*Host, error) {
-	cfg, err := LoadFileConfig(configPath)
-	if err != nil {
+// New starts the MCP stdio server described by cfg and prepares the LLM client.
+func New(ctx context.Context, cfg *Config) (*Host, error) {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	srv, err := cfg.DirMCPServer()
+	srv, err := cfg.dirMCPServer()
 	if err != nil {
 		return nil, err
 	}

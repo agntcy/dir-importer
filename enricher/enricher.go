@@ -62,7 +62,7 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 		return nil, fmt.Errorf("enricher config: %w", err)
 	}
 
-	th, err := toolhost.NewFromConfigFile(ctx, cfg.ConfigFile)
+	th, err := toolhost.New(ctx, &cfg.ToolHost)
 	if err != nil {
 		return nil, fmt.Errorf("enricher tool host: %w", err)
 	}

@@ -11,13 +11,11 @@ import (
 	"strings"
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
+	"github.com/agntcy/dir-importer/enricher/toolhost"
 )
 
-// Default values for enricher configuration.
-const (
-	DefaultConfigFile        = "importer/enricher/enricher.json"
-	DefaultRequestsPerMinute = 2 // Default maximum LLM API requests per minute (to avoid rate limit errors)
-)
+// DefaultRequestsPerMinute is the fallback maximum LLM API requests per minute (to avoid rate limit errors).
+const DefaultRequestsPerMinute = 2
 
 //go:embed enricher.skills.prompt.md
 var DefaultSkillsPromptTemplate string
@@ -27,10 +25,10 @@ var DefaultDomainsPromptTemplate string
 
 // Config contains configuration for the enricher pipeline stage.
 type Config struct {
-	ConfigFile            string // Path to enricher JSON (model, mcpServers, max-steps)
-	SkillsPromptTemplate  string // Path to custom skills prompt template file (empty = embedded default)
-	DomainsPromptTemplate string // Path to custom domains prompt template file (empty = embedded default)
-	RequestsPerMinute     int    // Maximum LLM API requests per minute (to avoid rate limit errors)
+	ToolHost              toolhost.Config // Tool-host configuration (model, MCP servers, max-steps)
+	SkillsPromptTemplate  string          // Path to custom skills prompt template file (empty = embedded default)
+	DomainsPromptTemplate string          // Path to custom domains prompt template file (empty = embedded default)
+	RequestsPerMinute     int             // Maximum LLM API requests per minute (to avoid rate limit errors)
 
 	SkipEnricher bool              // SkipEnricher bypasses LLM-based enrichment entirely.
 	Skills       []*typesv1.Skill  // OASF skill taxonomy entries assigned to every record when SkipEnricher is true.
@@ -43,12 +41,8 @@ func (c *Config) Validate() error {
 		return c.validateSkipEnricher()
 	}
 
-	if c.ConfigFile == "" {
-		return errors.New("config file is required")
-	}
-
-	if _, err := os.Stat(c.ConfigFile); err != nil {
-		return fmt.Errorf("config file not found: %w", err)
+	if err := c.ToolHost.Validate(); err != nil {
+		return fmt.Errorf("tool host: %w", err)
 	}
 
 	if c.RequestsPerMinute <= 0 {
