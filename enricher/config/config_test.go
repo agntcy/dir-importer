@@ -78,12 +78,10 @@ func TestValidate_ConfigFile(t *testing.T) {
 	}
 }
 
-// Validate populates SkillsPromptTemplate / DomainsPromptTemplate from embedded
-// defaults when the caller leaves them blank. This is load-bearing: skipping
-// it silently sends empty prompts to the LLM, which surfaces as cryptic
-// downstream JSON-parse failures (we hit this exact bug, hence the explicit
-// non-empty guard at the end of Validate).
-func TestValidate_PopulatesDefaultPromptTemplates(t *testing.T) {
+// When no template path is set, the prompts resolve to the embedded defaults.
+// This is load-bearing: an empty prompt silently sends no instructions to the
+// LLM, which surfaces as cryptic downstream JSON-parse failures.
+func TestPrompts_DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
 	cfg := enricherconfig.Config{
@@ -91,45 +89,64 @@ func TestValidate_PopulatesDefaultPromptTemplates(t *testing.T) {
 		RequestsPerMinute: 1,
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+	skills, err := cfg.SkillsPrompt()
+	if err != nil {
+		t.Fatalf("SkillsPrompt: %v", err)
 	}
 
-	if cfg.SkillsPromptTemplate != enricherconfig.DefaultSkillsPromptTemplate {
-		t.Errorf("SkillsPromptTemplate not populated from default")
+	if skills != enricherconfig.DefaultSkillsPromptTemplate {
+		t.Errorf("SkillsPrompt not the embedded default")
 	}
 
-	if cfg.DomainsPromptTemplate != enricherconfig.DefaultDomainsPromptTemplate {
-		t.Errorf("DomainsPromptTemplate not populated from default")
+	domains, err := cfg.DomainsPrompt()
+	if err != nil {
+		t.Fatalf("DomainsPrompt: %v", err)
+	}
+
+	if domains != enricherconfig.DefaultDomainsPromptTemplate {
+		t.Errorf("DomainsPrompt not the embedded default")
 	}
 }
 
-// When a custom template path is supplied, Validate reads its contents into the
-// field. Symmetric for both prompt fields.
-func TestValidate_LoadsCustomPromptTemplatesFromDisk(t *testing.T) {
+// When a custom template path is supplied, the prompts resolve to its contents.
+// Resolution must not mutate the input path fields.
+func TestPrompts_LoadCustomFromDisk(t *testing.T) {
 	t.Parallel()
 
 	const skillsBody = "custom skills prompt body"
 
 	const domainsBody = "custom domains prompt body"
 
+	skillsPath := writeFile(t, "skills.md", skillsBody)
+	domainsPath := writeFile(t, "domains.md", domainsBody)
+
 	cfg := enricherconfig.Config{
 		ConfigFile:            writeFile(t, "enricher.json", `{}`),
-		SkillsPromptTemplate:  writeFile(t, "skills.md", skillsBody),
-		DomainsPromptTemplate: writeFile(t, "domains.md", domainsBody),
+		SkillsPromptTemplate:  skillsPath,
+		DomainsPromptTemplate: domainsPath,
 		RequestsPerMinute:     1,
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+	skills, err := cfg.SkillsPrompt()
+	if err != nil {
+		t.Fatalf("SkillsPrompt: %v", err)
 	}
 
-	if cfg.SkillsPromptTemplate != skillsBody {
-		t.Errorf("SkillsPromptTemplate = %q, want %q", cfg.SkillsPromptTemplate, skillsBody)
+	if skills != skillsBody {
+		t.Errorf("SkillsPrompt = %q, want %q", skills, skillsBody)
 	}
 
-	if cfg.DomainsPromptTemplate != domainsBody {
-		t.Errorf("DomainsPromptTemplate = %q, want %q", cfg.DomainsPromptTemplate, domainsBody)
+	domains, err := cfg.DomainsPrompt()
+	if err != nil {
+		t.Fatalf("DomainsPrompt: %v", err)
+	}
+
+	if domains != domainsBody {
+		t.Errorf("DomainsPrompt = %q, want %q", domains, domainsBody)
+	}
+
+	if cfg.SkillsPromptTemplate != skillsPath || cfg.DomainsPromptTemplate != domainsPath {
+		t.Errorf("resolution mutated input path fields: skills=%q domains=%q", cfg.SkillsPromptTemplate, cfg.DomainsPromptTemplate)
 	}
 }
 

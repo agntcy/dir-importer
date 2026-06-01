@@ -26,8 +26,8 @@ var DefaultDomainsPromptTemplate string
 // Config contains configuration for the enricher pipeline stage.
 type Config struct {
 	ConfigFile            string // Path to enricher JSON (model, mcpServers, max-steps)
-	SkillsPromptTemplate  string // Path to custom skills prompt template file
-	DomainsPromptTemplate string // Path to custom domains prompt template file
+	SkillsPromptTemplate  string // Path to custom skills prompt template file (empty = embedded default)
+	DomainsPromptTemplate string // Path to custom domains prompt template file (empty = embedded default)
 	RequestsPerMinute     int    // Maximum LLM API requests per minute (to avoid rate limit errors)
 }
 
@@ -41,47 +41,64 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config file not found: %w", err)
 	}
 
-	if c.SkillsPromptTemplate != "" {
-		if _, err := os.Stat(c.SkillsPromptTemplate); err != nil {
-			return fmt.Errorf("skills prompt template file not found: %w", err)
-		}
-
-		data, err := os.ReadFile(c.SkillsPromptTemplate)
-		if err != nil {
-			return fmt.Errorf("failed to read skills prompt template file %s: %w", c.SkillsPromptTemplate, err)
-		}
-
-		c.SkillsPromptTemplate = string(data)
-	} else {
-		c.SkillsPromptTemplate = DefaultSkillsPromptTemplate
-	}
-
-	if c.DomainsPromptTemplate != "" {
-		if _, err := os.Stat(c.DomainsPromptTemplate); err != nil {
-			return fmt.Errorf("domains prompt template file not found: %w", err)
-		}
-
-		data, err := os.ReadFile(c.DomainsPromptTemplate)
-		if err != nil {
-			return fmt.Errorf("failed to read domains prompt template file %s: %w", c.DomainsPromptTemplate, err)
-		}
-
-		c.DomainsPromptTemplate = string(data)
-	} else {
-		c.DomainsPromptTemplate = DefaultDomainsPromptTemplate
-	}
-
 	if c.RequestsPerMinute <= 0 {
 		return errors.New("requests per minute must be greater than 0")
 	}
 
-	if strings.TrimSpace(c.SkillsPromptTemplate) == "" {
-		return errors.New("skills prompt template is empty after validation")
+	if err := validatePromptTemplate("skills", c.SkillsPromptTemplate); err != nil {
+		return err
 	}
 
-	if strings.TrimSpace(c.DomainsPromptTemplate) == "" {
-		return errors.New("domains prompt template is empty after validation")
+	if err := validatePromptTemplate("domains", c.DomainsPromptTemplate); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+// SkillsPrompt returns the skills prompt template content: the contents of the
+// SkillsPromptTemplate file, or the embedded default when no path is set.
+func (c *Config) SkillsPrompt() (string, error) {
+	return loadPromptTemplate("skills", c.SkillsPromptTemplate, DefaultSkillsPromptTemplate)
+}
+
+// DomainsPrompt returns the domains prompt template content: the contents of
+// the DomainsPromptTemplate file, or the embedded default when no path is set.
+func (c *Config) DomainsPrompt() (string, error) {
+	return loadPromptTemplate("domains", c.DomainsPromptTemplate, DefaultDomainsPromptTemplate)
+}
+
+// validatePromptTemplate checks a custom prompt template path. An empty path is
+// valid (the embedded default is used later); a non-empty path must point to an
+// existing, non-blank file.
+func validatePromptTemplate(label, path string) error {
+	if path == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("%s prompt template file not found: %w", label, err)
+	}
+
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("%s prompt template is empty", label)
+	}
+
+	return nil
+}
+
+// loadPromptTemplate returns the contents of the template file at path, or the
+// embedded fallback when path is empty.
+func loadPromptTemplate(label, path, fallback string) (string, error) {
+	if path == "" {
+		return fallback, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("%s prompt template file not found: %w", label, err)
+	}
+
+	return string(data), nil
 }
