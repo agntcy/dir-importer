@@ -25,7 +25,8 @@ const (
 	ImportTypeMCP ImportType = "mcp"
 	// ImportTypeA2A imports A2A AgentCard JSON from a local file (one object or an array).
 	ImportTypeA2A ImportType = "a2a"
-	// ImportTypeAgentSkill imports one Agent Skills directory (SKILL.md per https://agentskills.io/specification).
+	// ImportTypeAgentSkill imports Agent Skills directories (SKILL.md per https://agentskills.io/specification).
+	// FilePath may be a single skill directory or a root; nested skill directories are discovered recursively.
 	ImportTypeAgentSkill ImportType = "agent-skill"
 )
 
@@ -53,6 +54,10 @@ type Config struct {
 
 	Force bool // If true, push even if record already exists
 	Debug bool // If true, enable verbose debug output
+
+	// Authors overrides OASF record authors for imported records (repeatable via --author).
+	// When empty, translators derive authors from the source (e.g. SKILL.md metadata).
+	Authors []string
 
 	Enricher enricherconfig.Config // Configuration for the enricher pipeline stage
 	Scanner  scannerconfig.Config  // Configuration for the scanner pipeline stage

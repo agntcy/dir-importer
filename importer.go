@@ -37,7 +37,7 @@ type Importer struct {
 	pusher      types.Pusher
 }
 
-// New creates a new importer instance (MCP registry/file, A2A file, or Agent Skill directory).
+// New creates a new importer instance (MCP registry/file, A2A file, or Agent Skill directory tree).
 func New(ctx context.Context, client config.ClientInterface, cfg config.Config) (types.Importer, error) {
 	var (
 		fetch types.Fetcher
@@ -87,7 +87,7 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		client:      client,
 		fetcher:     fetch,
 		dedup:       d,
-		transformer: transformer.NewTransformer(cfg.Debug),
+		transformer: transformer.NewTransformer(cfg.Debug, cfg.Authors),
 		enricher:    e,
 		scanner:     sc,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),
