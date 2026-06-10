@@ -42,7 +42,7 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		defer close(outputCh)
 		defer close(errCh)
 
-		skillDirs, err := skill.DiscoverSkillDirectories(f.path)
+		skillDirs, err := skill.DiscoverSkillDirectories(ctx, f.path)
 		if err != nil {
 			select {
 			case errCh <- err:

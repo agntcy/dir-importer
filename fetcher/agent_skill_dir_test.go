@@ -5,6 +5,7 @@ package fetcher
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,5 +177,47 @@ func TestAgentSkillDirFetcher_Fetch_PartialParseFailure(t *testing.T) {
 
 	if !parseErr {
 		t.Fatal("expected parse error for bad-skill")
+	}
+}
+
+func TestAgentSkillDirFetcher_Fetch_ContextCanceledDuringDiscovery(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "code-review")
+
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	md := "---\nname: code-review\ndescription: Skill for cancellation test.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(md), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := NewAgentSkillDirFetcher(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	outCh, errCh := f.Fetch(ctx)
+
+	for range outCh {
+		t.Fatal("expected no items when discovery is canceled")
+	}
+
+	var canceled bool
+
+	for e := range errCh {
+		if e != nil && errors.Is(e, context.Canceled) {
+			canceled = true
+		}
+	}
+
+	if !canceled {
+		t.Fatal("expected context.Canceled on errCh")
 	}
 }

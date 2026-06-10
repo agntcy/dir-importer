@@ -4,6 +4,7 @@
 package skill
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,7 +18,12 @@ const skillFileName = "SKILL.md"
 // DiscoverSkillDirectories walks root recursively and returns every directory that
 // contains SKILL.md directly. When a skill directory is found, its subdirectories
 // are not searched (references/, scripts/, etc. belong to that skill).
-func DiscoverSkillDirectories(root string) ([]string, error) {
+// The walk stops promptly when ctx is canceled.
+func DiscoverSkillDirectories(ctx context.Context, root string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("discover skill directories: %w", err)
+	}
+
 	resolvedRoot, err := resolveSearchRoot(root)
 	if err != nil {
 		return nil, err
@@ -25,7 +31,24 @@ func DiscoverSkillDirectories(root string) ([]string, error) {
 
 	var skillDirs []string
 
-	walkErr := filepath.WalkDir(resolvedRoot, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(resolvedRoot, discoverSkillWalkFunc(ctx, resolvedRoot, &skillDirs))
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk skill directories: %w", walkErr)
+	}
+
+	if len(skillDirs) == 0 {
+		return nil, fmt.Errorf("no agent skills found under %s", resolvedRoot)
+	}
+
+	return skillDirs, nil
+}
+
+func discoverSkillWalkFunc(ctx context.Context, resolvedRoot string, skillDirs *[]string) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		if err != nil {
 			return err
 		}
@@ -58,24 +81,26 @@ func DiscoverSkillDirectories(root string) ([]string, error) {
 			return nil
 		}
 
+		skillWithinRoot, err := isPathWithinRoot(resolvedRoot, skillPath)
+		if err != nil {
+			return err
+		}
+
+		if !skillWithinRoot {
+			// SKILL.md may be a symlink pointing outside the search root; ignore it
+			// and keep walking subdirectories.
+			return nil
+		}
+
 		normalized, normErr := filepath.EvalSymlinks(path)
 		if normErr != nil {
 			normalized = path
 		}
 
-		skillDirs = append(skillDirs, normalized)
+		*skillDirs = append(*skillDirs, normalized)
 
 		return filepath.SkipDir
-	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("walk skill directories: %w", walkErr)
 	}
-
-	if len(skillDirs) == 0 {
-		return nil, fmt.Errorf("no agent skills found under %s", resolvedRoot)
-	}
-
-	return skillDirs, nil
 }
 
 func resolveSearchRoot(path string) (string, error) {
