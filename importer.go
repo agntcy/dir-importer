@@ -87,7 +87,7 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		client:      client,
 		fetcher:     fetch,
 		dedup:       d,
-		transformer: transformer.NewTransformer(cfg.Debug),
+		transformer: transformer.NewTransformer(cfg.Debug, cfg.Authors),
 		enricher:    e,
 		scanner:     sc,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),

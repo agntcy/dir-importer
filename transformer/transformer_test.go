@@ -27,7 +27,7 @@ const (
 func TestTransformRecord_MCP_Success_DebugOn(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(true)
+	tr := NewTransformer(true, nil)
 	item := types.MCPSourceItem(validMCP())
 
 	rec, err := tr.TransformRecord(item)
@@ -55,7 +55,7 @@ func TestTransformRecord_MCP_Success_DebugOn(t *testing.T) {
 func TestTransformRecord_MCP_Success_DebugOff(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	rec, err := tr.TransformRecord(types.MCPSourceItem(validMCP()))
 	if err != nil {
@@ -76,7 +76,7 @@ func TestTransformRecord_MCP_TranslationError(t *testing.T) {
 
 	// A server with neither remotes nor packages is structurally invalid as
 	// far as the OASF translator is concerned (nothing to bind a runtime to).
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 	item := types.MCPSourceItem(mcpapiv0.ServerResponse{
 		Server: mcpapiv0.ServerJSON{
 			Name:    "io.test/empty",
@@ -97,7 +97,7 @@ func TestTransformRecord_MCP_TranslationError(t *testing.T) {
 func TestTransformRecord_A2A_Success_DebugOn(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(true)
+	tr := NewTransformer(true, nil)
 
 	card := validA2ACard(t)
 
@@ -119,7 +119,7 @@ func TestTransformRecord_A2A_Success_DebugOn(t *testing.T) {
 func TestTransformRecord_A2A_Success_DebugOff(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	rec, err := tr.TransformRecord(types.A2ASourceItem(validA2ACard(t)))
 	if err != nil {
@@ -138,7 +138,7 @@ func TestTransformRecord_A2A_Success_DebugOff(t *testing.T) {
 func TestTransformRecord_A2A_NilCard(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindA2A, A2A: nil})
 	if err == nil {
@@ -157,7 +157,7 @@ func TestTransformRecord_AgentSkill_Success(t *testing.T) {
 	// OASF validation rejects unknown fields on this type), regardless of
 	// whether --debug is enabled.
 	for _, debug := range []bool{false, true} {
-		tr := NewTransformer(debug)
+		tr := NewTransformer(debug, nil)
 
 		skill := validAgentSkill(t)
 
@@ -176,10 +176,30 @@ func TestTransformRecord_AgentSkill_Success(t *testing.T) {
 	}
 }
 
+func TestTransformRecord_AgentSkill_WithAuthors(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, []string{"ACME Corp", "Example Team"})
+
+	rec, err := tr.TransformRecord(types.AgentSkillSourceItem(validAgentSkill(t)))
+	if err != nil {
+		t.Fatalf("TransformRecord: %v", err)
+	}
+
+	authorVals := rec.GetData().GetFields()["authors"].GetListValue().GetValues()
+	if len(authorVals) != 2 {
+		t.Fatalf("got %d authors, want 2", len(authorVals))
+	}
+
+	if authorVals[0].GetStringValue() != "ACME Corp" || authorVals[1].GetStringValue() != "Example Team" {
+		t.Fatalf("unexpected authors: %v", authorVals)
+	}
+}
+
 func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindAgentSkill, Skill: nil})
 	if err == nil {
@@ -194,7 +214,7 @@ func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 func TestTransformRecord_UnknownKind(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	// A SourceKind beyond the defined enum range should be rejected with a
 	// clear error rather than silently producing nil records.
@@ -213,7 +233,7 @@ func TestTransformRecord_UnknownKind(t *testing.T) {
 func TestTransform_PipelineHappyPath(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	in := make(chan types.SourceItem, 3)
 	in <- types.MCPSourceItem(validMCP())
@@ -254,7 +274,7 @@ func TestTransform_PipelineHappyPath(t *testing.T) {
 func TestTransform_PipelineMixedSuccessAndFailure(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	in := make(chan types.SourceItem, 2)
 	in <- types.MCPSourceItem(validMCP()) // ok
@@ -321,7 +341,7 @@ func TestTransform_PipelineMixedSuccessAndFailure(t *testing.T) {
 func TestTransform_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false)
+	tr := NewTransformer(false, nil)
 
 	in := make(chan types.SourceItem) // unbuffered: producer blocks until cancellation
 	ctx, cancel := context.WithCancel(context.Background())
