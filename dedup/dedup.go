@@ -17,6 +17,8 @@ import (
 	searchv1 "github.com/agntcy/dir/api/search/v1"
 )
 
+const trustedQueryValue = "true"
+
 var dedupLogger = logging.Logger("importer/pipeline/dedup")
 
 // OASF module names recognised by the deduplication cache. MCP and A2A include
@@ -41,10 +43,12 @@ var modulesByImportType = map[config.ImportType][]string{
 
 // DuplicateChecker checks for duplicate records by comparing name@version
 // against existing records in the directory. It queries only the modules that
-// are relevant for the configured import type.
+// are relevant for the configured import type. When signedOnly is true, the
+// search is limited to trusted records (signature verification passed).
 type DuplicateChecker struct {
 	client          config.ClientInterface
 	importType      config.ImportType
+	signedOnly      bool
 	debug           bool
 	existingRecords map[string]string // map[name@version]cid
 	mu              sync.RWMutex
@@ -53,10 +57,17 @@ type DuplicateChecker struct {
 // NewDuplicateChecker creates a new duplicate checker for the given import type.
 // It queries the directory for all existing records of the relevant module(s)
 // and builds an in-memory cache.
-func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, importType config.ImportType, debug bool) (*DuplicateChecker, error) {
+func NewDuplicateChecker(
+	ctx context.Context,
+	client config.ClientInterface,
+	importType config.ImportType,
+	signedOnly bool,
+	debug bool,
+) (*DuplicateChecker, error) {
 	checker := &DuplicateChecker{
 		client:          client,
 		importType:      importType,
+		signedOnly:      signedOnly,
 		debug:           debug,
 		existingRecords: make(map[string]string),
 	}
@@ -102,14 +113,9 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 			// Search for records with this module with pagination
 			limit := uint32(batchSize)
 			searchReq := &searchv1.SearchCIDsRequest{
-				Queries: []*searchv1.RecordQuery{
-					{
-						Type:  searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME,
-						Value: module,
-					},
-				},
-				Limit:  &limit,
-				Offset: &offset,
+				Queries: c.searchQueries(module),
+				Limit:   &limit,
+				Offset:  &offset,
 			}
 
 			result, err := c.client.SearchCIDs(ctx, searchReq)
@@ -163,7 +169,12 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 					continue
 				}
 
-				c.existingRecords[nameVersion] = record.GetCid()
+				cid := record.GetCid()
+				if cid == "" {
+					continue
+				}
+
+				c.existingRecords[nameVersion] = cid
 			}
 
 			c.mu.Unlock()
@@ -259,4 +270,22 @@ func (c *DuplicateChecker) isDuplicate(source types.SourceItem) bool {
 	}
 
 	return exists
+}
+
+func (c *DuplicateChecker) searchQueries(module string) []*searchv1.RecordQuery {
+	queries := []*searchv1.RecordQuery{
+		{
+			Type:  searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME,
+			Value: module,
+		},
+	}
+
+	if c.signedOnly {
+		queries = append(queries, &searchv1.RecordQuery{
+			Type:  searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED,
+			Value: trustedQueryValue,
+		})
+	}
+
+	return queries
 }

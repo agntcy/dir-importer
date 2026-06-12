@@ -55,6 +55,12 @@ type Config struct {
 	Force bool // If true, push even if record already exists
 	Debug bool // If true, enable verbose debug output
 
+	// DedupSignedOnly, when true, treats only trusted records (signature
+	// verification passed) as duplicates. Unsigned records or records where
+	// signing failed are not skipped, allowing a later import to push and sign
+	// again. Automatically enabled when SignFunc is set.
+	DedupSignedOnly bool
+
 	// Authors overrides OASF record authors for imported records (repeatable via --author).
 	// When empty, translators derive authors from the source (e.g. SKILL.md metadata).
 	Authors []string

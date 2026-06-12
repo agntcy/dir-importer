@@ -87,6 +87,15 @@ func (s *stubClient) PullBatch(ctx context.Context, refs []*corev1.RecordRef) ([
 	return nil, nil
 }
 
+func searchQueriesFrom(req *searchv1.SearchCIDsRequest) []searchv1.RecordQueryType {
+	types := make([]searchv1.RecordQueryType, 0, len(req.GetQueries()))
+	for _, q := range req.GetQueries() {
+		types = append(types, q.GetType())
+	}
+
+	return types
+}
+
 // recordWith returns a corev1.Record whose Data has the given name/version.
 // shared.ExtractNameVersion reads only those two fields.
 func recordWith(name, version string) *corev1.Record {
@@ -339,7 +348,7 @@ func TestNewDuplicateChecker_PopulatesCache(t *testing.T) {
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, false)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
@@ -364,7 +373,7 @@ func TestNewDuplicateChecker_SkipsRecordsWithoutNameVersion(t *testing.T) {
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false, false)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
@@ -393,7 +402,7 @@ func TestNewDuplicateChecker_UnknownImportTypeFallsBackToAllModules(t *testing.T
 		},
 	}
 
-	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false); err != nil {
+	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false, false); err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
@@ -425,7 +434,7 @@ func TestNewDuplicateChecker_SearchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, false)
 	if err == nil {
 		t.Fatal("expected error from SearchCIDs failure")
 	}
@@ -440,7 +449,7 @@ func TestNewDuplicateChecker_StreamError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false, false)
 	if err == nil {
 		t.Fatal("expected error from stream ErrCh")
 	}
@@ -458,7 +467,7 @@ func TestNewDuplicateChecker_PullBatchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, false)
 	if err == nil {
 		t.Fatal("expected error from PullBatch failure")
 	}
@@ -483,8 +492,91 @@ func TestNewDuplicateChecker_ContextCancelledDuringStream(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false, false)
 	if err == nil {
 		t.Fatal("expected error when context is cancelled mid-stream")
+	}
+}
+
+func TestNewDuplicateChecker_SignedOnly_AddsTrustedSearchQuery(t *testing.T) {
+	t.Parallel()
+
+	var gotQueries []searchv1.RecordQueryType
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			gotQueries = searchQueriesFrom(req)
+
+			return newStubStreamResult(nil, nil), nil
+		},
+	}
+
+	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, true, false); err != nil {
+		t.Fatalf("NewDuplicateChecker err = %v", err)
+	}
+
+	want := []searchv1.RecordQueryType{
+		searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME,
+		searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED,
+	}
+
+	if len(gotQueries) < len(want) {
+		t.Fatalf("got %d queries, want at least %d: %v", len(gotQueries), len(want), gotQueries)
+	}
+
+	for i, q := range want {
+		if gotQueries[i] != q {
+			t.Errorf("query[%d] = %v, want %v", i, gotQueries[i], q)
+		}
+	}
+}
+
+func TestNewDuplicateChecker_SignedOnly_ExcludesUnsignedFromCache(t *testing.T) {
+	t.Parallel()
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			for _, q := range req.GetQueries() {
+				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED && q.GetValue() != trustedQueryValue {
+					t.Fatalf("trusted query value = %q, want %q", q.GetValue(), trustedQueryValue)
+				}
+			}
+
+			// Trusted-only search returns no matches for unsigned records.
+			return newStubStreamResult(nil, nil), nil
+		},
+	}
+
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, true, false)
+	if err != nil {
+		t.Fatalf("NewDuplicateChecker err = %v", err)
+	}
+
+	if len(checker.existingRecords) != 0 {
+		t.Errorf("cache size = %d, want 0 (unsigned/untrusted records excluded by search)", len(checker.existingRecords))
+	}
+}
+
+func TestNewDuplicateChecker_SignedOnly_IncludesTrustedRecords(t *testing.T) {
+	t.Parallel()
+
+	wantNV := "signed@2.0.0"
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			return newStubStreamResult([]string{cidBafy1}, nil), nil
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			return []*corev1.Record{recordWith("signed", "2.0.0")}, nil
+		},
+	}
+
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, true, false)
+	if err != nil {
+		t.Fatalf("NewDuplicateChecker err = %v", err)
+	}
+
+	if got, ok := checker.existingRecords[wantNV]; !ok || got == "" {
+		t.Errorf("cache[%q] = %q, ok=%v; want non-empty cid, true", wantNV, got, ok)
 	}
 }
