@@ -18,14 +18,15 @@ type Importer interface {
 
 // ImportResult summarizes the outcome of an import operation.
 type ImportResult struct {
-	TotalRecords    int
-	ImportedCount   int
-	SkippedCount    int
-	FailedCount     int
-	Errors          []error
-	OutputDir       string
-	ImportedCIDs    []string
-	ScannerFindings []string
+	TotalRecords          int
+	ImportedCount         int
+	SkippedCount          int
+	FailedCount           int
+	Errors                []error
+	OutputDir             string
+	ImportedCIDs          []string
+	UnsignedDuplicateCIDs []string
+	ScannerFindings       []string
 }
 
 // Fetcher is an interface for fetching records from an external source.
@@ -73,14 +74,15 @@ type Scanner interface {
 
 // Result contains the results of the pipeline execution.
 type Result struct {
-	TotalRecords    int
-	ImportedCount   int
-	SkippedCount    int
-	FailedCount     int
-	Errors          []error
-	ImportedCIDs    []string // CIDs of successfully imported records
-	ScannerFindings []string
-	Mu              sync.Mutex
+	TotalRecords          int
+	ImportedCount         int
+	SkippedCount          int
+	FailedCount           int
+	Errors                []error
+	ImportedCIDs          []string // CIDs of successfully imported or signed records
+	UnsignedDuplicateCIDs []string // Existing unsigned duplicates queued for signing or output
+	ScannerFindings       []string
+	Mu                    sync.Mutex
 }
 
 // RecordScannerFinding appends a scanner finding message (e.g. "record-name: error: message").

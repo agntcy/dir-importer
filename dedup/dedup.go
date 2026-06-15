@@ -41,16 +41,29 @@ var modulesByImportType = map[config.ImportType][]string{
 	config.ImportTypeAgentSkill:  {moduleAgentSkillName},
 }
 
+type duplicateKind int
+
+const (
+	notDuplicate duplicateKind = iota
+	duplicateTrusted
+	duplicateUnsigned
+)
+
 // DuplicateChecker checks for duplicate records by comparing name@version
 // against existing records in the directory. It queries only the modules that
-// are relevant for the configured import type. When signedOnly is true, the
-// search is limited to trusted records (signature verification passed).
+// are relevant for the configured import type.
+//
+// When trackUnsigned is true, trusted and unsigned records are tracked
+// separately: trusted duplicates are skipped; unsigned duplicates are reported
+// via result.UnsignedDuplicateCIDs for signing or deferred signing output.
 type DuplicateChecker struct {
 	client          config.ClientInterface
 	importType      config.ImportType
-	signedOnly      bool
+	trackUnsigned   bool
 	debug           bool
-	existingRecords map[string]string // map[name@version]cid
+	existingRecords map[string]string // map[name@version]cid when trackUnsigned is false
+	trustedRecords  map[string]string // map[name@version]cid
+	unsignedRecords map[string]string // map[name@version]cid
 	mu              sync.RWMutex
 }
 
@@ -61,15 +74,17 @@ func NewDuplicateChecker(
 	ctx context.Context,
 	client config.ClientInterface,
 	importType config.ImportType,
-	signedOnly bool,
+	trackUnsigned bool,
 	debug bool,
 ) (*DuplicateChecker, error) {
 	checker := &DuplicateChecker{
 		client:          client,
 		importType:      importType,
-		signedOnly:      signedOnly,
+		trackUnsigned:   trackUnsigned,
 		debug:           debug,
 		existingRecords: make(map[string]string),
+		trustedRecords:  make(map[string]string),
+		unsignedRecords: make(map[string]string),
 	}
 
 	if err := checker.buildCache(ctx); err != nil {
@@ -77,7 +92,12 @@ func NewDuplicateChecker(
 	}
 
 	if debug {
-		fmt.Fprintf(os.Stderr, "[DEDUP] Cache built with %d existing %s records\n", len(checker.existingRecords), importType)
+		cacheSize := len(checker.existingRecords)
+		if trackUnsigned {
+			cacheSize = len(checker.trustedRecords) + len(checker.unsignedRecords)
+		}
+
+		fmt.Fprintf(os.Stderr, "[DEDUP] Cache built with %d existing %s records\n", cacheSize, importType)
 		os.Stderr.Sync()
 	}
 
@@ -90,6 +110,32 @@ func NewDuplicateChecker(
 //
 //nolint:gocognit,cyclop // Complexity is acceptable for building cache from multiple modules
 func (c *DuplicateChecker) buildCache(ctx context.Context) error {
+	if c.trackUnsigned {
+		if err := c.buildRecordsCache(ctx, true, c.trustedRecords); err != nil {
+			return err
+		}
+
+		allRecords := make(map[string]string)
+		if err := c.buildRecordsCache(ctx, false, allRecords); err != nil {
+			return err
+		}
+
+		for nameVersion, cid := range allRecords {
+			if _, trusted := c.trustedRecords[nameVersion]; trusted {
+				continue
+			}
+
+			c.unsignedRecords[nameVersion] = cid
+		}
+
+		return nil
+	}
+
+	return c.buildRecordsCache(ctx, false, c.existingRecords)
+}
+
+//nolint:gocognit,cyclop // Pagination loop over search/pull batches; splitting obscures flow.
+func (c *DuplicateChecker) buildRecordsCache(ctx context.Context, trustedOnly bool, dest map[string]string) error {
 	const (
 		batchSize  = 100   // Process 100 records at a time
 		maxRecords = 50000 // Safety limit to prevent unbounded memory growth
@@ -110,10 +156,9 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 		offset := uint32(0)
 
 		for {
-			// Search for records with this module with pagination
 			limit := uint32(batchSize)
 			searchReq := &searchv1.SearchCIDsRequest{
-				Queries: c.searchQueries(module),
+				Queries: c.searchQueries(module, trustedOnly),
 				Limit:   &limit,
 				Offset:  &offset,
 			}
@@ -123,7 +168,6 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 				return fmt.Errorf("search for existing %s records failed: %w", module, err)
 			}
 
-			// Collect CIDs from this batch
 			cids := make([]string, 0, batchSize)
 
 		L:
@@ -143,24 +187,20 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 				}
 			}
 
-			// No more results for this module
 			if len(cids) == 0 {
 				break
 			}
 
-			// Convert CIDs to RecordRefs
 			refs := make([]*corev1.RecordRef, 0, len(cids))
 			for _, cid := range cids {
 				refs = append(refs, &corev1.RecordRef{Cid: cid})
 			}
 
-			// Batch pull records from this batch
 			records, err := c.client.PullBatch(ctx, refs)
 			if err != nil {
 				return fmt.Errorf("failed to pull existing %s records: %w", module, err)
 			}
 
-			// Build the cache: name@version -> cid
 			c.mu.Lock()
 
 			for _, record := range records {
@@ -174,20 +214,19 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 					continue
 				}
 
-				c.existingRecords[nameVersion] = cid
+				dest[nameVersion] = cid
 			}
 
 			c.mu.Unlock()
 
 			totalProcessed += len(cids)
 
-			// Debug logging for batch progress
 			if c.debug {
-				fmt.Fprintf(os.Stderr, "[DEDUP] Processed %s batch: %d records (total: %d)\n", module, len(cids), totalProcessed)
+				fmt.Fprintf(os.Stderr, "[DEDUP] Processed %s batch: %d records (total: %d, trustedOnly=%t)\n",
+					module, len(cids), totalProcessed, trustedOnly)
 				os.Stderr.Sync()
 			}
 
-			// Safety check: prevent unbounded memory growth
 			if totalProcessed >= maxRecords {
 				dedupLogger.Warn("Deduplication cache limit reached",
 					"max_records", maxRecords,
@@ -196,12 +235,10 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 				return nil
 			}
 
-			// If we got fewer results than requested, we've reached the end
 			if len(cids) < batchSize {
 				break
 			}
 
-			// Move to next batch
 			offset += uint32(batchSize)
 		}
 	}
@@ -228,21 +265,39 @@ func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan 
 					return
 				}
 
-				// Check if duplicate
-				if c.isDuplicate(source) {
+				kind, cid := c.classify(source)
+				switch kind {
+				case duplicateTrusted:
 					result.Mu.Lock()
 					result.TotalRecords++
 					result.SkippedCount++
 					result.Mu.Unlock()
 
-					continue
-				}
+					if c.debug {
+						fmt.Fprintf(os.Stderr, "[DEDUP] %s is a trusted duplicate\n", source.NameVersion())
+						os.Stderr.Sync()
+					}
 
-				// Not a duplicate - pass it through (transform stage will count it)
-				select {
-				case outputCh <- source:
-				case <-ctx.Done():
-					return
+					continue
+				case duplicateUnsigned:
+					result.Mu.Lock()
+					result.TotalRecords++
+					result.SkippedCount++
+					result.UnsignedDuplicateCIDs = append(result.UnsignedDuplicateCIDs, cid)
+					result.Mu.Unlock()
+
+					if c.debug {
+						fmt.Fprintf(os.Stderr, "[DEDUP] %s is an unsigned duplicate (cid=%s)\n", source.NameVersion(), cid)
+						os.Stderr.Sync()
+					}
+
+					continue
+				case notDuplicate:
+					select {
+					case outputCh <- source:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}
@@ -251,28 +306,35 @@ func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan 
 	return outputCh
 }
 
-// isDuplicate checks if a source item is a duplicate of an existing directory record.
-func (c *DuplicateChecker) isDuplicate(source types.SourceItem) bool {
+func (c *DuplicateChecker) classify(source types.SourceItem) (duplicateKind, string) {
 	nameVersion := source.NameVersion()
 	if nameVersion == "" {
-		// Can't determine - not a duplicate (will be processed)
-		return false
+		return notDuplicate, ""
 	}
 
-	// Check if record already exists
 	c.mu.RLock()
-	_, exists := c.existingRecords[nameVersion]
-	c.mu.RUnlock()
+	defer c.mu.RUnlock()
 
-	if exists && c.debug {
-		fmt.Fprintf(os.Stderr, "[DEDUP] %s is a duplicate\n", nameVersion)
-		os.Stderr.Sync()
+	if !c.trackUnsigned {
+		if _, exists := c.existingRecords[nameVersion]; exists {
+			return duplicateTrusted, ""
+		}
+
+		return notDuplicate, ""
 	}
 
-	return exists
+	if _, exists := c.trustedRecords[nameVersion]; exists {
+		return duplicateTrusted, ""
+	}
+
+	if cid, exists := c.unsignedRecords[nameVersion]; exists {
+		return duplicateUnsigned, cid
+	}
+
+	return notDuplicate, ""
 }
 
-func (c *DuplicateChecker) searchQueries(module string) []*searchv1.RecordQuery {
+func (c *DuplicateChecker) searchQueries(module string, trustedOnly bool) []*searchv1.RecordQuery {
 	queries := []*searchv1.RecordQuery{
 		{
 			Type:  searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME,
@@ -280,7 +342,7 @@ func (c *DuplicateChecker) searchQueries(module string) []*searchv1.RecordQuery 
 		},
 	}
 
-	if c.signedOnly {
+	if trustedOnly {
 		queries = append(queries, &searchv1.RecordQuery{
 			Type:  searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED,
 			Value: trustedQueryValue,

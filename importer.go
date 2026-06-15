@@ -61,8 +61,9 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		return nil, fmt.Errorf("failed to create fetcher: %w", err)
 	}
 
-	signedOnlyDedup := cfg.DedupSignedOnly || cfg.SignFunc != nil
-	d, err := dedup.NewDuplicateChecker(ctx, client, cfg.Type, signedOnlyDedup, cfg.Debug)
+	trackUnsigned := cfg.SignFunc != nil || cfg.IncludeUnsignedCIDs
+
+	d, err := dedup.NewDuplicateChecker(ctx, client, cfg.Type, trackUnsigned, cfg.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create duplicate checker: %w", err)
 	}
@@ -218,14 +219,63 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 
 	wg.Wait()
 
+	i.processUnsignedDuplicates(ctx, result)
+
+	return i.buildImportResult(result, "")
+}
+
+func (i *Importer) buildImportResult(result *types.Result, outputDir string) *types.ImportResult {
 	return &types.ImportResult{
-		TotalRecords:    result.TotalRecords,
-		ImportedCount:   result.ImportedCount,
-		SkippedCount:    result.SkippedCount,
-		FailedCount:     result.FailedCount,
-		Errors:          result.Errors,
-		ImportedCIDs:    result.ImportedCIDs,
-		ScannerFindings: result.ScannerFindings,
+		TotalRecords:          result.TotalRecords,
+		ImportedCount:         result.ImportedCount,
+		SkippedCount:          result.SkippedCount,
+		FailedCount:           result.FailedCount,
+		Errors:                result.Errors,
+		OutputDir:             outputDir,
+		ImportedCIDs:          result.ImportedCIDs,
+		UnsignedDuplicateCIDs: result.UnsignedDuplicateCIDs,
+		ScannerFindings:       result.ScannerFindings,
+	}
+}
+
+// processUnsignedDuplicates signs or records CIDs for unsigned duplicates that
+// were skipped during dedup instead of re-importing them through the pipeline.
+func (i *Importer) processUnsignedDuplicates(ctx context.Context, result *types.Result) {
+	if len(result.UnsignedDuplicateCIDs) == 0 {
+		return
+	}
+
+	if i.cfg.DryRun {
+		if i.cfg.IncludeUnsignedCIDs {
+			result.Mu.Lock()
+			result.ImportedCIDs = append(result.ImportedCIDs, result.UnsignedDuplicateCIDs...)
+			result.Mu.Unlock()
+		}
+
+		return
+	}
+
+	for _, cid := range result.UnsignedDuplicateCIDs {
+		switch {
+		case i.cfg.SignFunc != nil:
+			if err := i.cfg.SignFunc(ctx, cid); err != nil {
+				result.Mu.Lock()
+				result.FailedCount++
+				result.Errors = append(result.Errors, fmt.Errorf("signing unsigned duplicate CID %s: %w", cid, err))
+				result.Mu.Unlock()
+
+				continue
+			}
+
+			result.Mu.Lock()
+			result.ImportedCount++
+			result.ImportedCIDs = append(result.ImportedCIDs, cid)
+			result.Mu.Unlock()
+		case i.cfg.IncludeUnsignedCIDs:
+			result.Mu.Lock()
+			result.ImportedCIDs = append(result.ImportedCIDs, cid)
+			result.Mu.Unlock()
+		}
 	}
 }
 
@@ -340,16 +390,9 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 
 	wg.Wait()
 
-	return &types.ImportResult{
-		TotalRecords:    result.TotalRecords,
-		ImportedCount:   result.ImportedCount,
-		SkippedCount:    result.SkippedCount,
-		FailedCount:     result.FailedCount,
-		Errors:          result.Errors,
-		OutputDir:       outputDir,
-		ImportedCIDs:    result.ImportedCIDs,
-		ScannerFindings: result.ScannerFindings,
-	}
+	i.processUnsignedDuplicates(ctx, result)
+
+	return i.buildImportResult(result, outputDir)
 }
 
 // writeRecords writes one JSON file per record into outputDir, named by the

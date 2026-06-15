@@ -181,8 +181,6 @@ func TestAgentSkillDirFetcher_Fetch_PartialParseFailure(t *testing.T) {
 }
 
 func TestAgentSkillDirFetcher_Fetch_ContextCanceledDuringDiscovery(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "code-review")
 

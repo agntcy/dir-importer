@@ -498,14 +498,19 @@ func TestNewDuplicateChecker_ContextCancelledDuringStream(t *testing.T) {
 	}
 }
 
-func TestNewDuplicateChecker_SignedOnly_AddsTrustedSearchQuery(t *testing.T) {
+func TestNewDuplicateChecker_TrackUnsigned_AddsTrustedSearchQuery(t *testing.T) {
 	t.Parallel()
 
-	var gotQueries []searchv1.RecordQueryType
+	var trustedQueries []searchv1.RecordQueryType
 
 	client := &stubClient{
 		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
-			gotQueries = searchQueriesFrom(req)
+			queries := searchQueriesFrom(req)
+			for _, q := range req.GetQueries() {
+				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED {
+					trustedQueries = queries
+				}
+			}
 
 			return newStubStreamResult(nil, nil), nil
 		},
@@ -520,30 +525,34 @@ func TestNewDuplicateChecker_SignedOnly_AddsTrustedSearchQuery(t *testing.T) {
 		searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED,
 	}
 
-	if len(gotQueries) < len(want) {
-		t.Fatalf("got %d queries, want at least %d: %v", len(gotQueries), len(want), gotQueries)
+	if len(trustedQueries) < len(want) {
+		t.Fatalf("trusted search got %d queries, want at least %d: %v", len(trustedQueries), len(want), trustedQueries)
 	}
 
 	for i, q := range want {
-		if gotQueries[i] != q {
-			t.Errorf("query[%d] = %v, want %v", i, gotQueries[i], q)
+		if trustedQueries[i] != q {
+			t.Errorf("query[%d] = %v, want %v", i, trustedQueries[i], q)
 		}
 	}
 }
 
-func TestNewDuplicateChecker_SignedOnly_ExcludesUnsignedFromCache(t *testing.T) {
+func TestNewDuplicateChecker_TrackUnsigned_SeparatesTrustedAndUnsigned(t *testing.T) {
 	t.Parallel()
+
+	const unsignedCID = "bafyunsigned"
 
 	client := &stubClient{
 		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
 			for _, q := range req.GetQueries() {
-				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED && q.GetValue() != trustedQueryValue {
-					t.Fatalf("trusted query value = %q, want %q", q.GetValue(), trustedQueryValue)
+				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED {
+					return newStubStreamResult(nil, nil), nil
 				}
 			}
 
-			// Trusted-only search returns no matches for unsigned records.
-			return newStubStreamResult(nil, nil), nil
+			return newStubStreamResult([]string{unsignedCID}, nil), nil
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			return []*corev1.Record{recordWith("unsigned", "1.0.0")}, nil
 		},
 	}
 
@@ -552,18 +561,29 @@ func TestNewDuplicateChecker_SignedOnly_ExcludesUnsignedFromCache(t *testing.T) 
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
-	if len(checker.existingRecords) != 0 {
-		t.Errorf("cache size = %d, want 0 (unsigned/untrusted records excluded by search)", len(checker.existingRecords))
+	if len(checker.trustedRecords) != 0 {
+		t.Errorf("trusted cache size = %d, want 0", len(checker.trustedRecords))
+	}
+
+	wantNV := "unsigned@1.0.0"
+	if got, ok := checker.unsignedRecords[wantNV]; !ok || got == "" {
+		t.Errorf("unsignedRecords[%q] = %q, ok=%v; want non-empty cid, true", wantNV, got, ok)
 	}
 }
 
-func TestNewDuplicateChecker_SignedOnly_IncludesTrustedRecords(t *testing.T) {
+func TestNewDuplicateChecker_TrackUnsigned_IncludesTrustedRecords(t *testing.T) {
 	t.Parallel()
 
 	wantNV := "signed@2.0.0"
 
 	client := &stubClient{
-		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			for _, q := range req.GetQueries() {
+				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_TRUSTED {
+					return newStubStreamResult([]string{cidBafy1}, nil), nil
+				}
+			}
+
 			return newStubStreamResult([]string{cidBafy1}, nil), nil
 		},
 		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
@@ -576,7 +596,43 @@ func TestNewDuplicateChecker_SignedOnly_IncludesTrustedRecords(t *testing.T) {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
-	if got, ok := checker.existingRecords[wantNV]; !ok || got == "" {
-		t.Errorf("cache[%q] = %q, ok=%v; want non-empty cid, true", wantNV, got, ok)
+	if got, ok := checker.trustedRecords[wantNV]; !ok || got == "" {
+		t.Errorf("trustedRecords[%q] = %q, ok=%v; want non-empty cid, true", wantNV, got, ok)
+	}
+
+	if _, ok := checker.unsignedRecords[wantNV]; ok {
+		t.Errorf("trusted record should not appear in unsignedRecords")
+	}
+}
+
+func TestFilterDuplicates_RecordsUnsignedDuplicateCID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	result := &types.Result{}
+
+	c := &DuplicateChecker{
+		trackUnsigned:   true,
+		trustedRecords:  map[string]string{},
+		unsignedRecords: map[string]string{"unsigned@1.0.0": "bafyunsigned"},
+	}
+
+	in := make(chan types.SourceItem, 1)
+	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "unsigned", Version: "1.0.0"}})
+
+	close(in)
+
+	out := c.FilterDuplicates(ctx, in, result)
+
+	for range out {
+		t.Fatal("unsigned duplicate should not pass through pipeline")
+	}
+
+	if len(result.UnsignedDuplicateCIDs) != 1 || result.UnsignedDuplicateCIDs[0] != "bafyunsigned" {
+		t.Fatalf("UnsignedDuplicateCIDs = %v, want [bafyunsigned]", result.UnsignedDuplicateCIDs)
+	}
+
+	if result.SkippedCount != 1 {
+		t.Errorf("SkippedCount = %d, want 1", result.SkippedCount)
 	}
 }
