@@ -229,6 +229,7 @@ func (i *Importer) buildImportResult(result *types.Result, outputDir string) *ty
 		TotalRecords:          result.TotalRecords,
 		ImportedCount:         result.ImportedCount,
 		SkippedCount:          result.SkippedCount,
+		SignedCount:           result.SignedCount,
 		FailedCount:           result.FailedCount,
 		Errors:                result.Errors,
 		OutputDir:             outputDir,
@@ -248,14 +249,19 @@ func (i *Importer) processUnsignedDuplicates(ctx context.Context, result *types.
 	if i.cfg.DryRun {
 		if i.cfg.IncludeUnsignedCIDs {
 			result.Mu.Lock()
-			result.ImportedCIDs = append(result.ImportedCIDs, result.UnsignedDuplicateCIDs...)
+
+			for _, cid := range uniqueCIDs(result.UnsignedDuplicateCIDs) {
+				result.ImportedCIDs = append(result.ImportedCIDs, cid)
+				result.SignedCount++
+			}
+
 			result.Mu.Unlock()
 		}
 
 		return
 	}
 
-	for _, cid := range result.UnsignedDuplicateCIDs {
+	for _, cid := range uniqueCIDs(result.UnsignedDuplicateCIDs) {
 		switch {
 		case i.cfg.SignFunc != nil:
 			if err := i.cfg.SignFunc(ctx, cid); err != nil {
@@ -268,15 +274,40 @@ func (i *Importer) processUnsignedDuplicates(ctx context.Context, result *types.
 			}
 
 			result.Mu.Lock()
-			result.ImportedCount++
+			result.SignedCount++
 			result.ImportedCIDs = append(result.ImportedCIDs, cid)
 			result.Mu.Unlock()
 		case i.cfg.IncludeUnsignedCIDs:
 			result.Mu.Lock()
+			result.SignedCount++
 			result.ImportedCIDs = append(result.ImportedCIDs, cid)
 			result.Mu.Unlock()
 		}
 	}
+}
+
+func uniqueCIDs(cids []string) []string {
+	if len(cids) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(cids))
+	unique := make([]string, 0, len(cids))
+
+	for _, cid := range cids {
+		if cid == "" {
+			continue
+		}
+
+		if _, ok := seen[cid]; ok {
+			continue
+		}
+
+		seen[cid] = struct{}{}
+		unique = append(unique, cid)
+	}
+
+	return unique
 }
 
 func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {

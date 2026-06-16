@@ -19,9 +19,12 @@ import (
 )
 
 const (
-	fieldName    = "name"
-	fieldVersion = "version"
-	cidBafy1     = "bafy1"
+	fieldName            = "name"
+	fieldVersion         = "version"
+	cidBafy1             = "bafy1"
+	unsignedCID          = "bafyunsigned"
+	version100           = "1.0.0"
+	unsignedAtVersion100 = "unsigned@1.0.0"
 )
 
 // stubStreamResult is a hand-rolled streaming.StreamResult that emits the
@@ -120,7 +123,7 @@ func TestFilterDuplicates_SkipsKnownDuplicate(t *testing.T) {
 	}
 
 	in := make(chan types.SourceItem, 2)
-	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "dup", Version: "1.0.0"}})
+	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "dup", Version: version100}})
 
 	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "new", Version: "2.0.0"}})
 
@@ -539,8 +542,6 @@ func TestNewDuplicateChecker_TrackUnsigned_AddsTrustedSearchQuery(t *testing.T) 
 func TestNewDuplicateChecker_TrackUnsigned_SeparatesTrustedAndUnsigned(t *testing.T) {
 	t.Parallel()
 
-	const unsignedCID = "bafyunsigned"
-
 	client := &stubClient{
 		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
 			for _, q := range req.GetQueries() {
@@ -552,7 +553,7 @@ func TestNewDuplicateChecker_TrackUnsigned_SeparatesTrustedAndUnsigned(t *testin
 			return newStubStreamResult([]string{unsignedCID}, nil), nil
 		},
 		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
-			return []*corev1.Record{recordWith("unsigned", "1.0.0")}, nil
+			return []*corev1.Record{recordWith("unsigned", version100)}, nil
 		},
 	}
 
@@ -565,7 +566,7 @@ func TestNewDuplicateChecker_TrackUnsigned_SeparatesTrustedAndUnsigned(t *testin
 		t.Errorf("trusted cache size = %d, want 0", len(checker.trustedRecords))
 	}
 
-	wantNV := "unsigned@1.0.0"
+	wantNV := unsignedAtVersion100
 	if got, ok := checker.unsignedRecords[wantNV]; !ok || got == "" {
 		t.Errorf("unsignedRecords[%q] = %q, ok=%v; want non-empty cid, true", wantNV, got, ok)
 	}
@@ -614,11 +615,11 @@ func TestFilterDuplicates_RecordsUnsignedDuplicateCID(t *testing.T) {
 	c := &DuplicateChecker{
 		trackUnsigned:   true,
 		trustedRecords:  map[string]string{},
-		unsignedRecords: map[string]string{"unsigned@1.0.0": "bafyunsigned"},
+		unsignedRecords: map[string]string{unsignedAtVersion100: unsignedCID},
 	}
 
 	in := make(chan types.SourceItem, 1)
-	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "unsigned", Version: "1.0.0"}})
+	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "unsigned", Version: version100}})
 
 	close(in)
 
@@ -628,11 +629,48 @@ func TestFilterDuplicates_RecordsUnsignedDuplicateCID(t *testing.T) {
 		t.Fatal("unsigned duplicate should not pass through pipeline")
 	}
 
-	if len(result.UnsignedDuplicateCIDs) != 1 || result.UnsignedDuplicateCIDs[0] != "bafyunsigned" {
-		t.Fatalf("UnsignedDuplicateCIDs = %v, want [bafyunsigned]", result.UnsignedDuplicateCIDs)
+	if len(result.UnsignedDuplicateCIDs) != 1 || result.UnsignedDuplicateCIDs[0] != unsignedCID {
+		t.Fatalf("UnsignedDuplicateCIDs = %v, want [%s]", result.UnsignedDuplicateCIDs, unsignedCID)
 	}
 
 	if result.SkippedCount != 1 {
 		t.Errorf("SkippedCount = %d, want 1", result.SkippedCount)
+	}
+}
+
+func TestFilterDuplicates_DedupesRepeatedUnsignedDuplicateCID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	result := &types.Result{}
+
+	c := &DuplicateChecker{
+		trackUnsigned:   true,
+		trustedRecords:  map[string]string{},
+		unsignedRecords: map[string]string{unsignedAtVersion100: unsignedCID},
+	}
+
+	item := types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "unsigned", Version: version100}})
+
+	in := make(chan types.SourceItem, 2)
+
+	in <- item
+
+	in <- item
+
+	close(in)
+
+	out := c.FilterDuplicates(ctx, in, result)
+
+	for range out {
+		t.Fatal("unsigned duplicate should not pass through pipeline")
+	}
+
+	if len(result.UnsignedDuplicateCIDs) != 1 {
+		t.Fatalf("UnsignedDuplicateCIDs = %v, want one unique CID", result.UnsignedDuplicateCIDs)
+	}
+
+	if result.SkippedCount != 2 {
+		t.Errorf("SkippedCount = %d, want 2", result.SkippedCount)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/agntcy/dir-importer/config"
@@ -247,9 +248,8 @@ func (c *DuplicateChecker) buildRecordsCache(ctx context.Context, trustedOnly bo
 }
 
 // FilterDuplicates implements the DuplicateChecker interface.
-// It filters out duplicate records from the input channel and returns a channel
-// with only non-duplicate records. It tracks only the skipped (duplicate) count.
-// The transform stage will track the total records that are actually processed.
+//
+//nolint:gocognit // Switch over duplicate kinds in a single consumer goroutine.
 func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan types.SourceItem, result *types.Result) <-chan types.SourceItem {
 	outputCh := make(chan types.SourceItem)
 
@@ -283,7 +283,11 @@ func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan 
 					result.Mu.Lock()
 					result.TotalRecords++
 					result.SkippedCount++
-					result.UnsignedDuplicateCIDs = append(result.UnsignedDuplicateCIDs, cid)
+
+					if !slices.Contains(result.UnsignedDuplicateCIDs, cid) {
+						result.UnsignedDuplicateCIDs = append(result.UnsignedDuplicateCIDs, cid)
+					}
+
 					result.Mu.Unlock()
 
 					if c.debug {

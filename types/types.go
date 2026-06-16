@@ -21,6 +21,7 @@ type ImportResult struct {
 	TotalRecords          int
 	ImportedCount         int
 	SkippedCount          int
+	SignedCount           int // Unique unsigned duplicates successfully signed or exported for signing
 	FailedCount           int
 	Errors                []error
 	OutputDir             string
@@ -77,10 +78,11 @@ type Result struct {
 	TotalRecords          int
 	ImportedCount         int
 	SkippedCount          int
+	SignedCount           int // Unique unsigned duplicates successfully signed or exported for signing
 	FailedCount           int
 	Errors                []error
-	ImportedCIDs          []string // CIDs of successfully imported or signed records
-	UnsignedDuplicateCIDs []string // Existing unsigned duplicates queued for signing or output
+	ImportedCIDs          []string // CIDs of successfully imported records
+	UnsignedDuplicateCIDs []string // Unique existing unsigned duplicates queued for signing or output
 	ScannerFindings       []string
 	Mu                    sync.Mutex
 }

@@ -44,10 +44,7 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 
 		skillDirs, err := skill.DiscoverSkillDirectories(ctx, f.path)
 		if err != nil {
-			select {
-			case errCh <- err:
-			case <-ctx.Done():
-			}
+			errCh <- err
 
 			return
 		}
@@ -75,10 +72,13 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		}
 
 		if emitted == 0 {
-			select {
-			case errCh <- errors.New("no agent skills could be parsed (check earlier errors)"):
-			case <-ctx.Done():
+			if ctx.Err() != nil {
+				errCh <- ctx.Err()
+
+				return
 			}
+
+			errCh <- errors.New("no agent skills could be parsed (check earlier errors)")
 		}
 	}()
 
