@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,14 @@ import (
 )
 
 const fieldName = "name"
+
+const (
+	testCIDUnsigned = "cid-unsigned"
+	testCIDOk       = "cid-ok"
+	testCIDBad      = "cid-bad"
+	testCIDA        = "cid-a"
+	testCIDB        = "cid-b"
+)
 
 // --- Mocks ---
 
@@ -152,6 +161,64 @@ func (m *mockDedupByName) FilterDuplicates(
 				case <-ctx.Done():
 					return
 				}
+			}
+		}
+	}()
+
+	return out
+}
+
+// mockUnsignedDuplicateDedup skips items present in unsignedDuplicates (name -> cid),
+// mirroring dedup accounting for unsigned duplicate recovery.
+type mockUnsignedDuplicateDedup struct {
+	unsignedDuplicates map[string]string
+}
+
+//nolint:gocognit // Test double mirrors dedup unsigned-duplicate accounting.
+func (m *mockUnsignedDuplicateDedup) FilterDuplicates(
+	ctx context.Context,
+	inputCh <-chan types.SourceItem,
+	result *types.Result,
+) <-chan types.SourceItem {
+	out := make(chan types.SourceItem)
+
+	go func() {
+		defer close(out)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case s, ok := <-inputCh:
+				if !ok {
+					return
+				}
+
+				var name string
+				if s.Kind == types.SourceKindMCP {
+					name = s.MCP.Server.Name
+				}
+
+				cid, dup := m.unsignedDuplicates[name]
+				if !dup {
+					select {
+					case out <- s:
+					case <-ctx.Done():
+						return
+					}
+
+					continue
+				}
+
+				result.Mu.Lock()
+				result.TotalRecords++
+				result.SkippedCount++
+
+				if cid != "" && !slices.Contains(result.UnsignedDuplicateCIDs, cid) {
+					result.UnsignedDuplicateCIDs = append(result.UnsignedDuplicateCIDs, cid)
+				}
+
+				result.Mu.Unlock()
 			}
 		}
 	}()
@@ -402,6 +469,249 @@ func TestImporter_Run_Success(t *testing.T) {
 
 	if len(pusher.pushed) != 3 {
 		t.Errorf("pushed = %d, want 3", len(pusher.pushed))
+	}
+}
+
+func TestProcessUnsignedDuplicates_SignFuncInvokedPerUniqueCID(t *testing.T) {
+	t.Parallel()
+
+	var signed []string
+
+	imp := &Importer{cfg: config.Config{
+		SignFunc: func(_ context.Context, cid string) error {
+			signed = append(signed, cid)
+
+			return nil
+		},
+	}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDA, testCIDA, testCIDB},
+		SkippedCount:          3,
+		ImportedCount:         2,
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if len(signed) != 2 || signed[0] != testCIDA || signed[1] != testCIDB {
+		t.Fatalf("SignFunc signed %v, want [%s %s]", signed, testCIDA, testCIDB)
+	}
+
+	if result.SignedCount != 2 {
+		t.Errorf("SignedCount = %d, want 2", result.SignedCount)
+	}
+
+	if result.ImportedCount != 2 {
+		t.Errorf("ImportedCount = %d, want 2 (unchanged)", result.ImportedCount)
+	}
+
+	if len(result.ImportedCIDs) != 2 {
+		t.Fatalf("ImportedCIDs = %v, want two entries", result.ImportedCIDs)
+	}
+}
+
+func TestProcessUnsignedDuplicates_SignFuncFailure(t *testing.T) {
+	t.Parallel()
+
+	imp := &Importer{cfg: config.Config{
+		SignFunc: func(_ context.Context, cid string) error {
+			if cid == testCIDBad {
+				return errors.New("sign failed")
+			}
+
+			return nil
+		},
+	}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDOk, testCIDBad},
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if result.SignedCount != 1 {
+		t.Errorf("SignedCount = %d, want 1", result.SignedCount)
+	}
+
+	if result.FailedCount != 1 {
+		t.Errorf("FailedCount = %d, want 1", result.FailedCount)
+	}
+
+	if len(result.Errors) != 1 {
+		t.Fatalf("Errors = %v, want one sign failure", result.Errors)
+	}
+}
+
+func TestProcessUnsignedDuplicates_IncludeUnsignedCIDs(t *testing.T) {
+	t.Parallel()
+
+	imp := &Importer{cfg: config.Config{IncludeUnsignedCIDs: true}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDA, testCIDA},
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if result.SignedCount != 1 {
+		t.Errorf("SignedCount = %d, want 1", result.SignedCount)
+	}
+
+	if len(result.ImportedCIDs) != 1 || result.ImportedCIDs[0] != testCIDA {
+		t.Fatalf("ImportedCIDs = %v, want [%s]", result.ImportedCIDs, testCIDA)
+	}
+}
+
+func TestProcessUnsignedDuplicates_DryRunIncludeUnsignedCIDs(t *testing.T) {
+	t.Parallel()
+
+	imp := &Importer{cfg: config.Config{DryRun: true, IncludeUnsignedCIDs: true}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDA, testCIDB},
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if result.SignedCount != 2 {
+		t.Errorf("SignedCount = %d, want 2", result.SignedCount)
+	}
+
+	if len(result.ImportedCIDs) != 2 {
+		t.Fatalf("ImportedCIDs = %v, want two entries", result.ImportedCIDs)
+	}
+}
+
+func TestProcessUnsignedDuplicates_DryRunWithoutIncludeUnsignedCIDs(t *testing.T) {
+	t.Parallel()
+
+	imp := &Importer{cfg: config.Config{DryRun: true}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDA},
+		SignedCount:           0,
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if result.SignedCount != 0 {
+		t.Errorf("SignedCount = %d, want 0", result.SignedCount)
+	}
+
+	if len(result.ImportedCIDs) != 0 {
+		t.Fatalf("ImportedCIDs = %v, want none", result.ImportedCIDs)
+	}
+}
+
+func TestProcessUnsignedDuplicates_NoSignOrIncludeIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	imp := &Importer{cfg: config.Config{}}
+
+	result := &types.Result{
+		UnsignedDuplicateCIDs: []string{testCIDA},
+	}
+
+	imp.processUnsignedDuplicates(context.Background(), result)
+
+	if result.SignedCount != 0 || len(result.ImportedCIDs) != 0 {
+		t.Fatalf("expected no signing/output without SignFunc or IncludeUnsignedCIDs: SignedCount=%d ImportedCIDs=%v",
+			result.SignedCount, result.ImportedCIDs)
+	}
+}
+
+func TestImporter_Run_UnsignedDuplicateSigning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	var signed []string
+
+	cfg := baseConfig()
+	cfg.SignFunc = func(_ context.Context, cid string) error {
+		signed = append(signed, cid)
+
+		return nil
+	}
+
+	fetcher := &mockFetcher{items: mcpSourceItems(
+		testServer("new"),
+		testServer("existing-unsigned"),
+	)}
+
+	dedup := &mockUnsignedDuplicateDedup{
+		unsignedDuplicates: map[string]string{
+			"existing-unsigned": testCIDUnsigned,
+		},
+	}
+
+	pusher := &mockPusher{}
+
+	imp := testImporter(cfg, fetcher, dedup, &mockTransformer{}, nil, pusher)
+
+	res := imp.Run(ctx)
+
+	if res.ImportedCount != 1 {
+		t.Errorf("ImportedCount = %d, want 1", res.ImportedCount)
+	}
+
+	if res.SkippedCount != 1 {
+		t.Errorf("SkippedCount = %d, want 1", res.SkippedCount)
+	}
+
+	if res.SignedCount != 1 {
+		t.Errorf("SignedCount = %d, want 1", res.SignedCount)
+	}
+
+	if len(signed) != 1 || signed[0] != testCIDUnsigned {
+		t.Fatalf("SignFunc signed %v, want [%s]", signed, testCIDUnsigned)
+	}
+
+	if len(pusher.pushed) != 1 {
+		t.Errorf("pushed = %d, want 1", len(pusher.pushed))
+	}
+
+	if res.TotalRecords != res.SkippedCount+res.ImportedCount+res.FailedCount {
+		t.Errorf("TotalRecords %d != skipped+imported+failed = %d",
+			res.TotalRecords, res.SkippedCount+res.ImportedCount+res.FailedCount)
+	}
+}
+
+func TestImporter_DryRun_IncludeUnsignedCIDs(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	cfg := baseConfig()
+	cfg.DryRun = true
+	cfg.IncludeUnsignedCIDs = true
+
+	fetcher := &mockFetcher{items: mcpSourceItems(testServer("existing-unsigned"))}
+
+	dedup := &mockUnsignedDuplicateDedup{
+		unsignedDuplicates: map[string]string{
+			"existing-unsigned": testCIDUnsigned,
+		},
+	}
+
+	imp := testImporter(cfg, fetcher, dedup, &mockTransformer{}, nil, &mockPusher{})
+
+	res := imp.DryRun(ctx)
+
+	if res.SignedCount != 1 {
+		t.Errorf("SignedCount = %d, want 1", res.SignedCount)
+	}
+
+	if len(res.ImportedCIDs) != 1 || res.ImportedCIDs[0] != testCIDUnsigned {
+		t.Fatalf("ImportedCIDs = %v, want [%s]", res.ImportedCIDs, testCIDUnsigned)
+	}
+
+	if res.SkippedCount != 1 {
+		t.Errorf("SkippedCount = %d, want 1", res.SkippedCount)
+	}
+
+	if res.ImportedCount != 0 {
+		t.Errorf("ImportedCount = %d, want 0", res.ImportedCount)
 	}
 }
 
