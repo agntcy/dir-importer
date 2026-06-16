@@ -18,14 +18,20 @@ type Importer interface {
 
 // ImportResult summarizes the outcome of an import operation.
 type ImportResult struct {
-	TotalRecords          int
-	ImportedCount         int
-	SkippedCount          int
-	SignedCount           int // Unique unsigned duplicates successfully signed or exported for signing
-	FailedCount           int
-	Errors                []error
-	OutputDir             string
-	ImportedCIDs          []string
+	TotalRecords  int
+	ImportedCount int
+	SkippedCount  int
+	SignedCount   int // Unique untrusted duplicate CIDs successfully signed or exported for deferred signing
+	FailedCount   int
+	Errors        []error
+	OutputDir     string
+	// ImportedCIDs lists CIDs for caller output (--output-cids): newly pushed records plus,
+	// when IncludeUnsignedCIDs is set or inline signing succeeds, untrusted duplicate CIDs
+	// from dedup. Length can exceed ImportedCount when duplicates were skipped, not re-pushed.
+	ImportedCIDs []string
+	// UnsignedDuplicateCIDs lists unique CIDs of existing records matched at dedup that are
+	// not trusted (module records minus trusted=true): unsigned and failed-verification
+	// records. Populated when SignFunc or IncludeUnsignedCIDs enables split dedup caching.
 	UnsignedDuplicateCIDs []string
 	ScannerFindings       []string
 }
@@ -75,14 +81,20 @@ type Scanner interface {
 
 // Result contains the results of the pipeline execution.
 type Result struct {
-	TotalRecords          int
-	ImportedCount         int
-	SkippedCount          int
-	SignedCount           int // Unique unsigned duplicates successfully signed or exported for signing
-	FailedCount           int
-	Errors                []error
-	ImportedCIDs          []string // CIDs of successfully imported records
-	UnsignedDuplicateCIDs []string // Unique existing unsigned duplicates queued for signing or output
+	TotalRecords  int
+	ImportedCount int
+	SkippedCount  int
+	SignedCount   int // Unique untrusted duplicate CIDs successfully signed or exported for deferred signing
+	FailedCount   int
+	Errors        []error
+	// ImportedCIDs lists CIDs for caller output (--output-cids): newly pushed records plus,
+	// when IncludeUnsignedCIDs is set or inline signing succeeds, untrusted duplicate CIDs
+	// from dedup. Length can exceed ImportedCount when duplicates were skipped, not re-pushed.
+	ImportedCIDs []string
+	// UnsignedDuplicateCIDs lists unique CIDs of existing records matched at dedup that are
+	// not trusted (module records minus trusted=true): unsigned and failed-verification
+	// records. Populated when SignFunc or IncludeUnsignedCIDs enables split dedup caching.
+	UnsignedDuplicateCIDs []string
 	ScannerFindings       []string
 	Mu                    sync.Mutex
 }

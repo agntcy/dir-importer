@@ -54,9 +54,10 @@ const (
 // against existing records in the directory. It queries only the modules that
 // are relevant for the configured import type.
 //
-// When trackUnsigned is true, trusted and unsigned records are tracked
-// separately: trusted duplicates are skipped; unsigned duplicates are reported
-// via result.UnsignedDuplicateCIDs for signing or deferred signing output.
+// When trackUnsigned is true, trusted and non-trusted records are tracked
+// separately: trusted duplicates are skipped; non-trusted duplicates (unsigned or
+// failed verification) are reported via result.UnsignedDuplicateCIDs for signing
+// or deferred signing output.
 type DuplicateChecker struct {
 	client          config.ClientInterface
 	importType      config.ImportType
