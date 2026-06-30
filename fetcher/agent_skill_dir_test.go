@@ -51,6 +51,10 @@ func TestAgentSkillDirFetcher_Fetch(t *testing.T) {
 			t.Fatal("expected wrapped skillMarkdown payload")
 		}
 
+		if _, ok := item.Skill.GetFields()["skillArchive"]; ok {
+			t.Fatal("expected no skillArchive for markdown-only skill directory")
+		}
+
 		n++
 	}
 
@@ -219,5 +223,52 @@ func TestAgentSkillDirFetcher_Fetch_ContextCanceledDuringDiscovery(t *testing.T)
 
 	if !canceled {
 		t.Fatal("expected context.Canceled on errCh")
+	}
+}
+
+func TestAgentSkillDirFetcher_Fetch_BundledWhenSupportingFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	skillDir := filepath.Join(dir, "with-refs")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	md := "---\nname: with-refs\ndescription: Skill with supporting files.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(md), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(skillDir, "references", "guide.md"), []byte("# Guide\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := NewAgentSkillDirFetcher(skillDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outCh, errCh := f.Fetch(context.Background())
+
+	var n int
+
+	for item := range outCh {
+		if item.Skill.GetFields()["skillArchive"].GetStringValue() == "" {
+			t.Fatal("expected skillArchive for skill with supporting files")
+		}
+
+		n++
+	}
+
+	for e := range errCh {
+		if e != nil {
+			t.Fatalf("unexpected err: %v", e)
+		}
+	}
+
+	if n != 1 {
+		t.Fatalf("got %d items, want 1", n)
 	}
 }

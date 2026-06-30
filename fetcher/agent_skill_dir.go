@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/agntcy/dir-importer/skill"
@@ -42,12 +43,22 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		defer close(outputCh)
 		defer close(errCh)
 
+		info, err := os.Stat(f.path)
+		if err != nil {
+			sendError(ctx, errCh, fmt.Errorf("stat skill path: %w", err))
+
+			return
+		}
+
+		if !info.IsDir() {
+			sendError(ctx, errCh, errors.New("skill path must be a directory"))
+
+			return
+		}
+
 		skillDirs, err := skill.DiscoverSkillDirectories(ctx, f.path)
 		if err != nil {
-			select {
-			case errCh <- err:
-			case <-ctx.Done():
-			}
+			sendError(ctx, errCh, err)
 
 			return
 		}
@@ -55,13 +66,9 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		var emitted int
 
 		for _, skillDir := range skillDirs {
-			st, err := skill.ParseSkillDirectory(skillDir)
+			st, err := skill.ParseSkillDirectoryForImport(skillDir)
 			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("%s: %w", skillDir, err):
-				case <-ctx.Done():
-					return
-				}
+				sendError(ctx, errCh, fmt.Errorf("%s: %w", skillDir, err))
 
 				continue
 			}
@@ -75,12 +82,20 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		}
 
 		if emitted == 0 {
-			select {
-			case errCh <- errors.New("no agent skills could be parsed (check earlier errors)"):
-			case <-ctx.Done():
-			}
+			sendError(ctx, errCh, errors.New("no agent skills could be parsed (check earlier errors)"))
 		}
 	}()
 
 	return outputCh, errCh
+}
+
+func sendError(ctx context.Context, errCh chan<- error, err error) {
+	select {
+	case errCh <- err:
+	case <-ctx.Done():
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
 }

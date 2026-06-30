@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
@@ -166,12 +167,39 @@ func translatorOptions(authors []string) []translator.TranslatorOption {
 
 // convertAgentSkillToOASF converts a parsed Agent Skill payload to an OASF record.
 func convertAgentSkillToOASF(skill *structpb.Struct, authors []string) (*corev1.Record, error) {
-	data, err := translator.SkillMarkdownToRecord(skill, translatorOptions(authors)...)
-	if err != nil {
-		return nil, fmt.Errorf("SkillMarkdownToRecord: %w", err)
+	opts := translatorOptions(authors)
+
+	var (
+		data *structpb.Struct
+		err  error
+	)
+
+	if hasSkillArchive(skill) {
+		data, err = translator.SkillBundleToRecord(skill, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("SkillBundleToRecord: %w", err)
+		}
+	} else {
+		data, err = translator.SkillMarkdownToRecord(skill, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("SkillMarkdownToRecord: %w", err)
+		}
 	}
 
 	return &corev1.Record{Data: data}, nil
+}
+
+func hasSkillArchive(skill *structpb.Struct) bool {
+	if skill == nil {
+		return false
+	}
+
+	v, ok := skill.GetFields()["skillArchive"]
+	if !ok {
+		return false
+	}
+
+	return strings.TrimSpace(v.GetStringValue()) != ""
 }
 
 func convertA2AToOASF(card *structpb.Struct, authors []string) (*corev1.Record, error) {

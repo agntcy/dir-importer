@@ -4,7 +4,11 @@
 package transformer
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -18,6 +22,7 @@ const (
 	fixtureName        = "io.test/transformer-fixture"
 	fixtureVersion     = "1.0.0"
 	fieldName          = "name"
+	fieldVersion       = "version"
 	fieldDescription   = "description"
 	fixtureDescription = "transformer test fixture"
 )
@@ -193,6 +198,46 @@ func TestTransformRecord_AgentSkill_WithAuthors(t *testing.T) {
 
 	if authorVals[0].GetStringValue() != "ACME Corp" || authorVals[1].GetStringValue() != "Example Team" {
 		t.Fatalf("unexpected authors: %v", authorVals)
+	}
+}
+
+func TestTransformRecord_AgentSkill_Bundle(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, nil)
+
+	rec, err := tr.TransformRecord(types.AgentSkillSourceItem(validAgentSkillBundle(t)))
+	if err != nil {
+		t.Fatalf("TransformRecord: %v", err)
+	}
+
+	if rec == nil || rec.GetData() == nil {
+		t.Fatal("returned record has no data")
+	}
+
+	foundModule := false
+
+	for _, modVal := range rec.GetData().GetFields()["modules"].GetListValue().GetValues() {
+		mod := modVal.GetStructValue()
+		if mod.GetFields()["name"].GetStringValue() != "core/language_model/agentskills" {
+			continue
+		}
+
+		foundModule = true
+
+		artifact := mod.GetFields()["artifact"].GetStructValue()
+		if artifact.GetFields()["media_type"].GetStringValue() != "application/agent-skills+gzip" {
+			t.Fatalf("media_type = %q", artifact.GetFields()["media_type"].GetStringValue())
+		}
+
+		artifacts := mod.GetFields()["data"].GetStructValue().GetFields()["artifacts"].GetListValue().GetValues()
+		if len(artifacts) != 1 {
+			t.Fatalf("expected 1 indexed artifact, got %d", len(artifacts))
+		}
+	}
+
+	if !foundModule {
+		t.Fatal("agentskills module not found")
 	}
 }
 
@@ -386,7 +431,7 @@ func validA2ACard(t *testing.T) *structpb.Struct {
 
 	card, err := structpb.NewStruct(map[string]any{
 		fieldName:          fixtureName,
-		"version":          fixtureVersion,
+		fieldVersion:       fixtureVersion,
 		fieldDescription:   fixtureDescription,
 		"documentationUrl": "https://example.invalid/agents",
 		"capabilities": map[string]any{
@@ -434,11 +479,70 @@ func validAgentSkill(t *testing.T) *structpb.Struct {
 		"skillMarkdown":  md,
 		fieldName:        "test-skill",
 		fieldDescription: "transformer fixture skill",
-		"metadata":       map[string]any{"version": "0.1.0"},
+		"metadata":       map[string]any{fieldVersion: "0.1.0"},
 	})
 	if err != nil {
 		t.Fatalf("validAgentSkill: %v", err)
 	}
 
 	return skill
+}
+
+func validAgentSkillBundle(t *testing.T) *structpb.Struct {
+	t.Helper()
+
+	const md = "---\nname: bundled-skill\ndescription: Bundled transformer fixture.\nmetadata:\n  author: example-org\n  version: \"1.0\"\n---\n\n# Bundled\n"
+
+	archive := buildTestSkillBundleArchive(t, map[string]string{
+		"SKILL.md":            md,
+		"references/extra.md": "# Extra\n",
+	})
+
+	skill, err := structpb.NewStruct(map[string]any{
+		"skillMarkdown":  md,
+		"skillArchive":   base64.StdEncoding.EncodeToString(archive),
+		fieldName:        "bundled-skill",
+		fieldDescription: "Bundled transformer fixture.",
+		"metadata":       map[string]any{fieldVersion: "1.0", "author": "example-org"},
+	})
+	if err != nil {
+		t.Fatalf("validAgentSkillBundle: %v", err)
+	}
+
+	return skill
+}
+
+func buildTestSkillBundleArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0o600,
+			Size: int64(len(content)),
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("write tar header for %q: %v", name, err)
+		}
+
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("write tar payload for %q: %v", name, err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+
+	if err := gzw.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+
+	return buf.Bytes()
 }

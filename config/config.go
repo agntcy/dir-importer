@@ -25,8 +25,11 @@ const (
 	ImportTypeMCP ImportType = "mcp"
 	// ImportTypeA2A imports A2A AgentCard JSON from a local file (one object or an array).
 	ImportTypeA2A ImportType = "a2a"
-	// ImportTypeAgentSkill imports Agent Skills directories (SKILL.md per https://agentskills.io/specification).
-	// FilePath may be a single skill directory or a root; nested skill directories are discovered recursively.
+	// ImportTypeAgentSkill imports Agent Skills packages (https://agentskills.io/specification).
+	// FilePath must be a skill directory or a root directory whose nested skill directories
+	// are discovered recursively.
+	// Markdown-only skills (only SKILL.md) are imported as application/agent-skills+md;
+	// skills with additional files are imported as application/agent-skills+gzip.
 	ImportTypeAgentSkill ImportType = "agent-skill"
 )
 
