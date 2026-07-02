@@ -10,9 +10,9 @@ import (
 	"time"
 
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
-	scannertypes "github.com/agntcy/dir-importer/scanner/types"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
+	dirscanner "github.com/agntcy/dir/utils/scanner"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -20,17 +20,17 @@ const errorMessage = "boom"
 
 type mockScanner struct {
 	name   string
-	result *scannertypes.ScanResult
+	result *dirscanner.ScanResult
 	err    error
 }
 
 func (m *mockScanner) Name() string { return m.name }
-func (m *mockScanner) Scan(_ context.Context, _ *corev1.Record) (*scannertypes.ScanResult, error) {
+func (m *mockScanner) Run(_ context.Context, _ *corev1.Record) (*dirscanner.ScanResult, error) {
 	return m.result, m.err
 }
 
-func newScannerStage(scanners []scannertypes.Scanner, cfg scannerconfig.Config) *Scanner {
-	return &Scanner{cfg: cfg, scanners: scanners}
+func newScannerStage(runners []dirscanner.Runner, cfg scannerconfig.Config) *Scanner {
+	return &Scanner{cfg: cfg, runners: runners}
 }
 
 func newRecord(t *testing.T, name string) *corev1.Record {
@@ -45,97 +45,6 @@ func newRecord(t *testing.T, name string) *corev1.Record {
 	}
 
 	return &corev1.Record{Data: st}
-}
-
-// --- mergeScanResults ---
-
-func TestMergeScanResults_Empty(t *testing.T) {
-	t.Parallel()
-
-	got := mergeScanResults(nil)
-	if got == nil || !got.Skipped || got.SkippedReason == "" {
-		t.Errorf("empty input must produce a skipped result: %+v", got)
-	}
-}
-
-func TestMergeScanResults_SinglePassThrough(t *testing.T) {
-	t.Parallel()
-
-	in := &scannertypes.ScanResult{Safe: true}
-	got := mergeScanResults([]*scannertypes.ScanResult{in})
-
-	if got != in {
-		t.Error("single result should be returned as-is")
-	}
-}
-
-func TestMergeScanResults_AllSafe(t *testing.T) {
-	t.Parallel()
-
-	got := mergeScanResults([]*scannertypes.ScanResult{
-		{Safe: true},
-		{Safe: true},
-	})
-
-	if !got.Safe || got.Skipped {
-		t.Errorf("all-safe should be Safe and not Skipped: %+v", got)
-	}
-}
-
-func TestMergeScanResults_OneNotSafeWinsOverall(t *testing.T) {
-	t.Parallel()
-
-	got := mergeScanResults([]*scannertypes.ScanResult{
-		{Safe: true},
-		{Safe: false, Findings: []scannertypes.Finding{{Severity: scannertypes.SeverityError, Message: errorMessage}}},
-	})
-
-	if got.Safe {
-		t.Error("any non-safe result should make the merged result non-safe")
-	}
-
-	if len(got.Findings) != 1 {
-		t.Errorf("findings should be merged, got %d", len(got.Findings))
-	}
-}
-
-func TestMergeScanResults_AllSkipped(t *testing.T) {
-	t.Parallel()
-
-	got := mergeScanResults([]*scannertypes.ScanResult{
-		{Skipped: true, SkippedReason: "no rules"},
-		{Skipped: true, SkippedReason: "no scanners"},
-	})
-
-	if !got.Skipped {
-		t.Error("all skipped → merged should be skipped")
-	}
-
-	if got.Safe {
-		t.Error("skipped merged result must not be marked safe")
-	}
-
-	if got.SkippedReason == "" {
-		t.Error("merged skip reason should be populated")
-	}
-}
-
-func TestMergeScanResults_FindingsAlwaysMakeSafeFalse(t *testing.T) {
-	t.Parallel()
-
-	// A scanner can report Safe=true while still emitting an info-severity
-	// finding. The merge logic conservatively flips Safe to false whenever
-	// findings are present so the handler always processes them. The
-	// single-result fast path returns the input as-is, so we test via the
-	// multi-input branch where mergeScanResults actually rebuilds Safe.
-	got := mergeScanResults([]*scannertypes.ScanResult{
-		{Safe: true, Findings: []scannertypes.Finding{{Severity: scannertypes.SeverityInfo, Message: "fyi"}}},
-		{Safe: true},
-	})
-
-	if got.Safe {
-		t.Error("merged result with any finding should be unsafe")
-	}
 }
 
 // --- Scan stage ---
@@ -163,7 +72,7 @@ func TestScan_NoScanners_PassesAllRecords(t *testing.T) {
 	}
 
 	if passed != 2 {
-		t.Errorf("passed = %d, want 2 (no scanners → skipped → records pass through)", passed)
+		t.Errorf("passed = %d, want 2 (no runners → skipped → records pass through)", passed)
 	}
 
 	if result.FailedCount != 0 {
@@ -174,9 +83,9 @@ func TestScan_NoScanners_PassesAllRecords(t *testing.T) {
 func TestScan_AllSafe_PassesAllRecords(t *testing.T) {
 	t.Parallel()
 
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "ok-1", result: &scannertypes.ScanResult{Safe: true}},
-		&mockScanner{name: "ok-2", result: &scannertypes.ScanResult{Safe: true}},
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "ok-1", result: &dirscanner.ScanResult{Safe: true}},
+		&mockScanner{name: "ok-2", result: &dirscanner.ScanResult{Safe: true}},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record, 1)
@@ -206,11 +115,11 @@ func TestScan_AllSafe_PassesAllRecords(t *testing.T) {
 func TestScan_FailOnError_DropsRecord(t *testing.T) {
 	t.Parallel()
 
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "broken", result: &scannertypes.ScanResult{
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "broken", result: &dirscanner.ScanResult{
 			Safe: false,
-			Findings: []scannertypes.Finding{
-				{Severity: scannertypes.SeverityError, Message: errorMessage},
+			Findings: []dirscanner.Finding{
+				{Severity: dirscanner.SeverityError, Message: errorMessage},
 			},
 		}},
 	}, scannerconfig.Config{FailOnError: true})
@@ -242,11 +151,11 @@ func TestScan_FailOnError_DropsRecord(t *testing.T) {
 func TestScan_FailOnWarning_DropsRecord(t *testing.T) {
 	t.Parallel()
 
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "noisy", result: &scannertypes.ScanResult{
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "noisy", result: &dirscanner.ScanResult{
 			Safe: false,
-			Findings: []scannertypes.Finding{
-				{Severity: scannertypes.SeverityWarning, Message: "watch out"},
+			Findings: []dirscanner.Finding{
+				{Severity: dirscanner.SeverityWarning, Message: "watch out"},
 			},
 		}},
 	}, scannerconfig.Config{FailOnWarning: true})
@@ -281,11 +190,11 @@ func TestScan_FailOnErrorWithOnlyWarnings_PassesRecord(t *testing.T) {
 	// FailOnError must only drop records that have ERROR-level findings;
 	// warning-only records should still be reported on the result but pass
 	// through unless FailOnWarning is also set.
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "warnings-only", result: &scannertypes.ScanResult{
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "warnings-only", result: &dirscanner.ScanResult{
 			Safe: false,
-			Findings: []scannertypes.Finding{
-				{Severity: scannertypes.SeverityWarning, Message: "iffy"},
+			Findings: []dirscanner.Finding{
+				{Severity: dirscanner.SeverityWarning, Message: "iffy"},
 			},
 		}},
 	}, scannerconfig.Config{FailOnError: true})
@@ -317,13 +226,13 @@ func TestScan_FailOnErrorWithOnlyWarnings_PassesRecord(t *testing.T) {
 func TestScan_AllScannersFail_RecordPassesAndErrorEmitted(t *testing.T) {
 	t.Parallel()
 
-	// When every scanner errors out, runAll returns an error. The Scan
+	// When every runner errors out, runAll returns an error. The Scan
 	// goroutine documents the contract: on a runAll error, the record is
-	// NOT dropped (we don't want a transient scanner outage to silently
+	// NOT dropped (we don't want a transient runner outage to silently
 	// reject records) — we emit an error and pass the record through.
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "down-1", err: errors.New("scanner offline")},
-		&mockScanner{name: "down-2", err: errors.New("scanner offline")},
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "down-1", err: errors.New("runner offline")},
+		&mockScanner{name: "down-2", err: errors.New("runner offline")},
 	}, scannerconfig.Config{FailOnError: true})
 
 	in := make(chan *corev1.Record, 1)
@@ -382,12 +291,12 @@ func TestScan_AllScannersFail_RecordPassesAndErrorEmitted(t *testing.T) {
 func TestScan_OneScannerFailsOthersSucceed_NoStageError(t *testing.T) {
 	t.Parallel()
 
-	// runAll returns an error only when ALL scanners fail. If at least one
+	// runAll returns an error only when ALL runners fail. If at least one
 	// succeeds, the merged result should drive the decision — no stage
 	// error should be emitted.
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "up", result: &scannertypes.ScanResult{Safe: true}},
-		&mockScanner{name: "down", err: errors.New("scanner offline")},
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "up", result: &dirscanner.ScanResult{Safe: true}},
+		&mockScanner{name: "down", err: errors.New("runner offline")},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record, 1)
@@ -418,19 +327,19 @@ func TestScan_OneScannerFailsOthersSucceed_NoStageError(t *testing.T) {
 	}
 
 	if errs != 0 {
-		t.Errorf("got %d stage errors; one-scanner-failure should not emit stage error", errs)
+		t.Errorf("got %d stage errors; one-runner-failure should not emit stage error", errs)
 	}
 }
 
 func TestScan_RecordsFindings(t *testing.T) {
 	t.Parallel()
 
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "noisy", result: &scannertypes.ScanResult{
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "noisy", result: &dirscanner.ScanResult{
 			Safe: false,
-			Findings: []scannertypes.Finding{
-				{Severity: scannertypes.SeverityWarning, Message: "watch"},
-				{Severity: scannertypes.SeverityError, Message: errorMessage},
+			Findings: []dirscanner.Finding{
+				{Severity: dirscanner.SeverityWarning, Message: "watch"},
+				{Severity: dirscanner.SeverityError, Message: errorMessage},
 			},
 		}},
 	}, scannerconfig.Config{}) // no fail-on-* → record still passes
@@ -457,8 +366,8 @@ func TestScan_RecordsFindings(t *testing.T) {
 func TestScan_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	stage := newScannerStage([]scannertypes.Scanner{
-		&mockScanner{name: "noop", result: &scannertypes.ScanResult{Safe: true}},
+	stage := newScannerStage([]dirscanner.Runner{
+		&mockScanner{name: "noop", result: &dirscanner.ScanResult{Safe: true}},
 	}, scannerconfig.Config{})
 
 	in := make(chan *corev1.Record) // unbuffered: no producer feeds

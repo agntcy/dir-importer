@@ -9,21 +9,21 @@ import (
 	"sync"
 
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
-	"github.com/agntcy/dir-importer/scanner/types"
+	dirscanner "github.com/agntcy/dir/utils/scanner"
 )
 
-// ScannerFactory creates a Scanner from the shared scanner config.
-type ScannerFactory func(cfg scannerconfig.Config) types.Scanner
+// RunnerFactory creates a Runner from the shared scanner config.
+type RunnerFactory func(cfg scannerconfig.Config) dirscanner.Runner
 
 var (
-	registry = make(map[string]ScannerFactory)
+	registry = make(map[string]RunnerFactory)
 	mu       sync.RWMutex
 )
 
-// Register registers a ScannerFactory under the given name.
+// Register registers a RunnerFactory under the given name.
 // It panics if the same name is registered twice to prevent duplications at compile-time.
-// Scanner implementations should call this from their init() function.
-func Register(name string, factory ScannerFactory) {
+// Runner implementations should call this from their init() function.
+func Register(name string, factory RunnerFactory) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -34,18 +34,18 @@ func Register(name string, factory ScannerFactory) {
 	registry[name] = factory
 }
 
-// NewScanners creates Scanner instances for all registered scanners.
-func NewScanners(cfg scannerconfig.Config) ([]types.Scanner, error) {
+// NewRunners creates Runner instances for all registered runners.
+func NewRunners(cfg scannerconfig.Config) ([]dirscanner.Runner, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	scanners := make([]types.Scanner, 0, len(registry))
+	runners := make([]dirscanner.Runner, 0, len(registry))
 
 	for _, name := range sortedRegistryNames() {
-		scanners = append(scanners, registry[name](cfg))
+		runners = append(runners, registry[name](cfg))
 	}
 
-	return scanners, nil
+	return runners, nil
 }
 
 func sortedRegistryNames() []string {

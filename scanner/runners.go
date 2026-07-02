@@ -1,15 +1,16 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
-package behavioral
+package scanner
 
 import (
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/scanner/factory"
-	"github.com/agntcy/dir-importer/scanner/types"
+	dirscanner "github.com/agntcy/dir/utils/scanner"
 )
 
-// Register the behavioral scanner with the factory on package init.
 func init() {
-	factory.Register("behavioral", func(cfg scannerconfig.Config) types.Scanner { return New(cfg) })
+	factory.Register("mcp", func(cfg scannerconfig.Config) dirscanner.Runner {
+		return dirscanner.NewMCPRunner(dirscanner.MCPConfig{CLIPath: cfg.CLIPath})
+	})
 }
