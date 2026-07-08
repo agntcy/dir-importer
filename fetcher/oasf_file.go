@@ -4,12 +4,8 @@
 package fetcher
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/agntcy/dir-importer/types"
@@ -43,133 +39,24 @@ func NewOASFFileFetcher(path string) (*oasfFileFetcher, error) {
 }
 
 // Fetch reads the file and sends each OASF record to the output channel.
-// Invalid array elements are reported on errCh and skipped.
-//
-//nolint:cyclop // linear control flow with many ctx/errCh branches (mirrors a2aFileFetcher.Fetch)
+// Invalid array elements are reported on errCh and skipped. See fetchStructFile
+// for the shared read/decode/validate/emit logic (mirrors a2aFileFetcher.Fetch).
 func (f *oasfFileFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-chan error) {
-	const chanBuf = 8
-
-	outputCh := make(chan types.SourceItem, chanBuf)
-	errCh := make(chan error, chanBuf)
-
-	go func() {
-		defer close(outputCh)
-		defer close(errCh)
-
-		raw, err := os.ReadFile(f.path)
-		if err != nil {
-			select {
-			case errCh <- fmt.Errorf("read file: %w", err):
-			case <-ctx.Done():
-			}
-
-			return
-		}
-
-		raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
-
-		items, fatalErr := decodeOASFRoot(ctx, raw, errCh)
-		if fatalErr != nil {
-			select {
-			case errCh <- fatalErr:
-			case <-ctx.Done():
-			}
-
-			return
-		}
-
-		if len(items) == 0 {
-			select {
-			case errCh <- errors.New("no OASF records found in file (check earlier errors if this was a JSON array)"):
-			case <-ctx.Done():
-			}
-
-			return
-		}
-
-		for i, recordMap := range items {
-			rec, err := oasfRecordStructFromMap(recordMap)
-			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("OASF record index %d: %w", i, err):
-				case <-ctx.Done():
-					return
-				}
-
-				continue
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case outputCh <- types.OASFSourceItem(rec):
-			}
-		}
-	}()
-
-	return outputCh, errCh
-}
-
-func oasfRecordStructFromMap(record map[string]any) (*structpb.Struct, error) {
-	if record == nil {
-		return nil, errors.New("record is nil")
-	}
-
-	name, _ := record["name"].(string)
-	if strings.TrimSpace(name) == "" {
-		return nil, errors.New("OASF record missing non-empty \"name\"")
-	}
-
-	st, err := structpb.NewStruct(record)
-	if err != nil {
-		return nil, fmt.Errorf("OASF record as struct: %w", err)
-	}
-
-	return st, nil
+	return fetchStructFile(ctx, structFileFetcherConfig{
+		path:            f.path,
+		itemLabel:       "OASF record",
+		collectionLabel: "OASF records",
+		wrap:            types.OASFSourceItem,
+	})
 }
 
 // decodeOASFRoot returns OASF record maps. For a JSON array, invalid elements
 // are skipped and errors are sent to errCh (best-effort; may drop an error if
 // errCh blocks).
 func decodeOASFRoot(ctx context.Context, raw []byte, errCh chan<- error) ([]map[string]any, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return nil, errors.New("file is empty")
-	}
-
-	if raw[0] == '[' {
-		var arr []json.RawMessage
-		if err := json.Unmarshal(raw, &arr); err != nil {
-			return nil, fmt.Errorf("decode JSON array: %w", err)
-		}
-
-		out := make([]map[string]any, 0, len(arr))
-
-		for i, elt := range arr {
-			var m map[string]any
-			if err := json.Unmarshal(elt, &m); err != nil {
-				sendOASFErr(ctx, errCh, fmt.Errorf("array index %d: %w", i, err))
-
-				continue
-			}
-
-			out = append(out, m)
-		}
-
-		return out, nil
-	}
-
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil, fmt.Errorf("decode JSON object: %w", err)
-	}
-
-	return []map[string]any{obj}, nil
+	return decodeStructRoot(ctx, raw, errCh)
 }
 
-func sendOASFErr(ctx context.Context, errCh chan<- error, err error) {
-	select {
-	case errCh <- err:
-	case <-ctx.Done():
-	}
+func oasfRecordStructFromMap(record map[string]any) (*structpb.Struct, error) {
+	return structFromMap(record, "OASF record")
 }

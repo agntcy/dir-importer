@@ -55,6 +55,10 @@ func OASFSourceItem(record *structpb.Struct) SourceItem {
 	return SourceItem{Kind: SourceKindOASF, OASF: record}
 }
 
+// defaultVersion is used for NameVersion when a source item has a name but no
+// version (e.g. an AgentCard, Agent Skill, or OASF record that omits it).
+const defaultVersion = "v1.0.0"
+
 // NameVersion returns "name@version" for deduplication, or "" if it cannot be derived.
 func (s SourceItem) NameVersion() string {
 	switch s.Kind {
@@ -63,55 +67,28 @@ func (s SourceItem) NameVersion() string {
 			return fmt.Sprintf("%s@%s", s.MCP.Server.Name, s.MCP.Server.Version)
 		}
 	case SourceKindA2A:
-		if s.A2A == nil {
-			return ""
-		}
-
-		name, version := topLevelNameVersionFields(s.A2A)
-		if name == "" {
-			return ""
-		}
-
-		if version == "" {
-			version = "v1.0.0"
-		}
-
-		return fmt.Sprintf("%s@%s", name, version)
-
+		return nameVersion(topLevelNameVersionFields(s.A2A))
 	case SourceKindAgentSkill:
-		if s.Skill == nil {
-			return ""
-		}
-
-		name, version := agentSkillNameVersionFields(s.Skill)
-		if name == "" {
-			return ""
-		}
-
-		if version == "" {
-			version = "v1.0.0"
-		}
-
-		return fmt.Sprintf("%s@%s", name, version)
-
+		return nameVersion(agentSkillNameVersionFields(s.Skill))
 	case SourceKindOASF:
-		if s.OASF == nil {
-			return ""
-		}
-
-		name, version := topLevelNameVersionFields(s.OASF)
-		if name == "" {
-			return ""
-		}
-
-		if version == "" {
-			version = "v1.0.0"
-		}
-
-		return fmt.Sprintf("%s@%s", name, version)
+		return nameVersion(topLevelNameVersionFields(s.OASF))
 	}
 
 	return ""
+}
+
+// nameVersion formats name/version as "name@version", defaulting an empty
+// version to defaultVersion. Returns "" if name is empty.
+func nameVersion(name, version string) string {
+	if name == "" {
+		return ""
+	}
+
+	if version == "" {
+		version = defaultVersion
+	}
+
+	return fmt.Sprintf("%s@%s", name, version)
 }
 
 // topLevelNameVersionFields extracts the top-level "name"/"version" string

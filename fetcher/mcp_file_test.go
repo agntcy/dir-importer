@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	errEmptyFile   = "file is empty"
-	whitespacePath = "   "
+	errEmptyFile       = "file is empty"
+	whitespacePath     = "   "
+	errDecodeJSONArray = "decode JSON array"
 )
 
 func TestDecodeServerResponses(t *testing.T) {
@@ -74,7 +75,7 @@ func TestDecodeServerResponses(t *testing.T) {
 		{
 			name:        "malformed JSON array",
 			raw:         `[{"server":{"name":`,
-			wantErrText: "decode JSON array",
+			wantErrText: errDecodeJSONArray,
 		},
 		{
 			name:        "single object that is neither an array nor a valid bare ServerJSON",

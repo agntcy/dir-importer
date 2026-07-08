@@ -10,7 +10,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-const fieldName = "name"
+const (
+	fieldName    = "name"
+	versionField = "version"
+)
 
 func TestSourceItem_NameVersion_MCP(t *testing.T) {
 	t.Parallel()
@@ -28,7 +31,7 @@ func TestSourceItem_NameVersion_MCP(t *testing.T) {
 func TestSourceItem_NameVersion_A2A(t *testing.T) {
 	t.Parallel()
 
-	st, err := structpb.NewStruct(map[string]any{fieldName: "agent", "version": "2.0.0"})
+	st, err := structpb.NewStruct(map[string]any{fieldName: "agent", versionField: "2.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +59,7 @@ func TestSourceItem_NameVersion_A2A(t *testing.T) {
 func TestSourceItem_NameVersion_OASF(t *testing.T) {
 	t.Parallel()
 
-	st, err := structpb.NewStruct(map[string]any{fieldName: "oasf-agent", "version": "2.1.0", "schema_version": "1.0.0"})
+	st, err := structpb.NewStruct(map[string]any{fieldName: "oasf-agent", versionField: "2.1.0", "schema_version": "1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +90,7 @@ func TestSourceItem_NameVersion_AgentSkill(t *testing.T) {
 	st, err := structpb.NewStruct(map[string]any{
 		fieldName: "my-skill",
 		"metadata": map[string]any{
-			"version": "3.0.0",
+			versionField: "3.0.0",
 		},
 	})
 	if err != nil {

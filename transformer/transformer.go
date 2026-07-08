@@ -20,6 +20,10 @@ import (
 // DefaultSchemaVersion is the OASF schema version used when Config.SchemaVersion is empty.
 const DefaultSchemaVersion = "1.1.0"
 
+// unknownNameVersion is used in error messages when SourceItem.NameVersion
+// cannot derive a "name@version" for a source that failed conversion.
+const unknownNameVersion = "(unknown)"
+
 // Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
 type Transformer struct {
 	debug         bool
@@ -112,7 +116,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
-				nv = "(unknown)"
+				nv = unknownNameVersion
 			}
 
 			return nil, fmt.Errorf("failed to convert A2A card %s to OASF: %w", nv, err)
@@ -135,7 +139,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
-				nv = "(unknown)"
+				nv = unknownNameVersion
 			}
 
 			return nil, fmt.Errorf("failed to convert agent skill %s to OASF: %w", nv, err)
@@ -174,7 +178,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		if _, err := record.Decode(); err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
-				nv = "(unknown)"
+				nv = unknownNameVersion
 			}
 
 			return nil, fmt.Errorf("invalid OASF record %s: %w", nv, err)

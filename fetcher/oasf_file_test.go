@@ -14,7 +14,10 @@ import (
 	"github.com/agntcy/dir-importer/types"
 )
 
-const errMissingRecordName = "missing non-empty"
+const (
+	errMissingRecordName = "missing non-empty"
+	schemaVersionKey     = "schema_version"
+)
 
 func writeOASFFixture(path, body string) error {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -24,101 +27,26 @@ func writeOASFFixture(path, body string) error {
 	return nil
 }
 
+// TestDecodeOASFRoot is a smoke test confirming decodeOASFRoot delegates to
+// decodeStructRoot; see TestDecodeStructRoot for full behavioral coverage.
 func TestDecodeOASFRoot(t *testing.T) {
 	t.Parallel()
 
 	const validRecord = `{"name":"hello-agent","schema_version":"1.0.0","version":"1.0.0"}`
 
-	tests := []struct {
-		name           string
-		raw            string
-		wantCount      int
-		wantPerElemErr int    // expected count of errors drained from errCh (best-effort, per-element)
-		wantFatalText  string // empty = expect no fatal error
-	}{
-		{
-			name:          "empty input is fatal",
-			raw:           "",
-			wantFatalText: errEmptyFile,
-		},
-		{
-			name:          "whitespace-only input is fatal",
-			raw:           "   \n",
-			wantFatalText: errEmptyFile,
-		},
-		{
-			name:      "single object decodes to one record",
-			raw:       validRecord,
-			wantCount: 1,
-		},
-		{
-			name:      "JSON array of one decodes to one record",
-			raw:       "[" + validRecord + "]",
-			wantCount: 1,
-		},
-		{
-			name:      "JSON array of three decodes to three records",
-			raw:       "[" + validRecord + "," + validRecord + "," + validRecord + "]",
-			wantCount: 3,
-		},
-		{
-			name:      "empty JSON array decodes to zero records (caller layers handle the empty case)",
-			raw:       "[]",
-			wantCount: 0,
-		},
-		{
-			name:          "malformed array is fatal",
-			raw:           `[{"name":`,
-			wantFatalText: "decode JSON array",
-		},
-		{
-			name:          "malformed single object is fatal",
-			raw:           `{"name":`,
-			wantFatalText: "decode JSON object",
-		},
-		{
-			name:           "array with mixed valid and malformed elements: valids decoded, malformed reported on errCh",
-			raw:            `[` + validRecord + `, "not an object", ` + validRecord + `]`,
-			wantCount:      2,
-			wantPerElemErr: 1,
-		},
+	errCh := make(chan error, 16)
+
+	got, fatalErr := decodeOASFRoot(context.Background(), []byte(validRecord), errCh)
+	if fatalErr != nil {
+		t.Fatalf("unexpected fatal error: %v", fatalErr)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	if len(got) != 1 {
+		t.Fatalf("decoded %d records, want 1", len(got))
+	}
 
-			// Buffered enough that decodeOASFRoot never blocks on errCh during the
-			// per-element loop; draining happens after the call.
-			errCh := make(chan error, 16)
-
-			got, fatalErr := decodeOASFRoot(context.Background(), []byte(tt.raw), errCh)
-
-			perElemErrs := drainErrs(errCh)
-
-			switch {
-			case tt.wantFatalText != "":
-				if fatalErr == nil {
-					t.Fatalf("expected fatal error containing %q, got nil", tt.wantFatalText)
-				}
-
-				if !strings.Contains(fatalErr.Error(), tt.wantFatalText) {
-					t.Fatalf("fatal error %q does not contain %q", fatalErr.Error(), tt.wantFatalText)
-				}
-			default:
-				if fatalErr != nil {
-					t.Fatalf("unexpected fatal error: %v", fatalErr)
-				}
-
-				if len(got) != tt.wantCount {
-					t.Fatalf("decoded %d records, want %d", len(got), tt.wantCount)
-				}
-
-				if len(perElemErrs) != tt.wantPerElemErr {
-					t.Fatalf("got %d per-element errors, want %d (errors: %v)", len(perElemErrs), tt.wantPerElemErr, perElemErrs)
-				}
-			}
-		})
+	if _, fatalErr := decodeOASFRoot(context.Background(), nil, errCh); fatalErr == nil {
+		t.Fatal("expected fatal error for empty input")
 	}
 }
 
@@ -137,25 +65,25 @@ func TestOASFRecordStructFromMap(t *testing.T) {
 		},
 		{
 			name:        "missing name is rejected",
-			record:      map[string]any{"schema_version": "1.0.0"},
+			record:      map[string]any{schemaVersionKey: cardVersionV1},
 			wantErrText: errMissingRecordName,
 		},
 		{
 			name:        "empty-string name is rejected",
-			record:      map[string]any{"name": "", "schema_version": "1.0.0"},
+			record:      map[string]any{cardNameKey: "", schemaVersionKey: cardVersionV1},
 			wantErrText: errMissingRecordName,
 		},
 		{
 			name:        "whitespace-only name is rejected",
-			record:      map[string]any{"name": whitespacePath, "schema_version": "1.0.0"},
+			record:      map[string]any{cardNameKey: whitespacePath, schemaVersionKey: cardVersionV1},
 			wantErrText: errMissingRecordName,
 		},
 		{
 			name: "valid record with extra fields is accepted (structpb passes them through)",
 			record: map[string]any{
-				"name":           "hello-agent",
-				"schema_version": "1.0.0",
-				"version":        "1.0.0",
+				cardNameKey:      "hello-agent",
+				schemaVersionKey: cardVersionV1,
+				cardVersionKey:   cardVersionV1,
 				"modules":        []any{},
 			},
 		},

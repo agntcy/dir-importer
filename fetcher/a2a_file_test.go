@@ -40,101 +40,26 @@ func drainErrs(errCh chan error) []error {
 	return out
 }
 
+// TestDecodeA2ARoot is a smoke test confirming decodeA2ARoot delegates to
+// decodeStructRoot; see TestDecodeStructRoot for full behavioral coverage.
 func TestDecodeA2ARoot(t *testing.T) {
 	t.Parallel()
 
 	const validCard = `{"name":"hello-agent","version":"1.0.0"}`
 
-	tests := []struct {
-		name           string
-		raw            string
-		wantCount      int
-		wantPerElemErr int    // expected count of errors drained from errCh (best-effort, per-element)
-		wantFatalText  string // empty = expect no fatal error
-	}{
-		{
-			name:          "empty input is fatal",
-			raw:           "",
-			wantFatalText: errEmptyFile,
-		},
-		{
-			name:          "whitespace-only input is fatal",
-			raw:           "   \n",
-			wantFatalText: errEmptyFile,
-		},
-		{
-			name:      "single object decodes to one card",
-			raw:       validCard,
-			wantCount: 1,
-		},
-		{
-			name:      "JSON array of one decodes to one card",
-			raw:       "[" + validCard + "]",
-			wantCount: 1,
-		},
-		{
-			name:      "JSON array of three decodes to three cards",
-			raw:       "[" + validCard + "," + validCard + "," + validCard + "]",
-			wantCount: 3,
-		},
-		{
-			name:      "empty JSON array decodes to zero cards (caller layers handle the empty case)",
-			raw:       "[]",
-			wantCount: 0,
-		},
-		{
-			name:          "malformed array is fatal",
-			raw:           `[{"name":`,
-			wantFatalText: "decode JSON array",
-		},
-		{
-			name:          "malformed single object is fatal",
-			raw:           `{"name":`,
-			wantFatalText: "decode JSON object",
-		},
-		{
-			name:           "array with mixed valid and malformed elements: valids decoded, malformed reported on errCh",
-			raw:            `[` + validCard + `, "not an object", ` + validCard + `]`,
-			wantCount:      2,
-			wantPerElemErr: 1,
-		},
+	errCh := make(chan error, 16)
+
+	got, fatalErr := decodeA2ARoot(context.Background(), []byte(validCard), errCh)
+	if fatalErr != nil {
+		t.Fatalf("unexpected fatal error: %v", fatalErr)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	if len(got) != 1 {
+		t.Fatalf("decoded %d cards, want 1", len(got))
+	}
 
-			// Buffered enough that decodeA2ARoot never blocks on errCh during the
-			// per-element loop; draining happens after the call.
-			errCh := make(chan error, 16)
-
-			got, fatalErr := decodeA2ARoot(context.Background(), []byte(tt.raw), errCh)
-
-			perElemErrs := drainErrs(errCh)
-
-			switch {
-			case tt.wantFatalText != "":
-				if fatalErr == nil {
-					t.Fatalf("expected fatal error containing %q, got nil", tt.wantFatalText)
-				}
-
-				if !strings.Contains(fatalErr.Error(), tt.wantFatalText) {
-					t.Fatalf("fatal error %q does not contain %q", fatalErr.Error(), tt.wantFatalText)
-				}
-			default:
-				if fatalErr != nil {
-					t.Fatalf("unexpected fatal error: %v", fatalErr)
-				}
-
-				if len(got) != tt.wantCount {
-					t.Fatalf("decoded %d cards, want %d", len(got), tt.wantCount)
-				}
-
-				if len(perElemErrs) != tt.wantPerElemErr {
-					t.Fatalf("got %d per-element errors, want %d (errors: %v)", len(perElemErrs), tt.wantPerElemErr, perElemErrs)
-				}
-			}
-		})
+	if _, fatalErr := decodeA2ARoot(context.Background(), nil, errCh); fatalErr == nil {
+		t.Fatal("expected fatal error for empty input")
 	}
 }
 
