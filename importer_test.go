@@ -328,6 +328,73 @@ func baseConfig() config.Config {
 	}
 }
 
+// --- New (wiring) ---
+
+// emptyStreamResult is a streaming.StreamResult that yields no records and no
+// error: its done channel is already closed, so dedup cache-building in New()
+// completes immediately without a network round-trip.
+type emptyStreamResult struct {
+	resCh  chan *searchv1.SearchCIDsResponse
+	errCh  chan error
+	doneCh chan struct{}
+}
+
+func newEmptyStreamResult() *emptyStreamResult {
+	r := &emptyStreamResult{
+		resCh:  make(chan *searchv1.SearchCIDsResponse),
+		errCh:  make(chan error, 1),
+		doneCh: make(chan struct{}),
+	}
+	close(r.doneCh)
+
+	return r
+}
+
+func (r *emptyStreamResult) ResCh() <-chan *searchv1.SearchCIDsResponse { return r.resCh }
+func (r *emptyStreamResult) ErrCh() <-chan error                        { return r.errCh }
+func (r *emptyStreamResult) DoneCh() <-chan struct{}                    { return r.doneCh }
+
+// stubClient is a minimal config.ClientInterface returning empty search
+// results, enough to let New() build an (empty) dedup cache without a server.
+type stubClient struct{}
+
+func (stubClient) Push(context.Context, *corev1.Record) (*corev1.RecordRef, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stubClient) SearchCIDs(
+	context.Context,
+	*searchv1.SearchCIDsRequest,
+) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+	return newEmptyStreamResult(), nil
+}
+
+func (stubClient) PullBatch(context.Context, []*corev1.RecordRef) ([]*corev1.Record, error) {
+	return nil, nil
+}
+
+// New must wire the OASF import type to the OASF file fetcher and complete the
+// rest of the pipeline construction (dedup, enricher, scanner, pusher). The
+// file path is not read at construction time, so a non-existent path is fine.
+func TestNew_OASF_WiresFetcher(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Type = config.ImportTypeOASF
+	cfg.FilePath = filepath.Join(t.TempDir(), "records.json")
+	// Static enrichment avoids standing up the LLM/MCP enrichment path.
+	cfg.Enricher = enricherconfig.Config{Static: &enricherconfig.StaticConfig{}}
+
+	imp, err := New(context.Background(), stubClient{}, cfg)
+	if err != nil {
+		t.Fatalf("New(OASF) err = %v", err)
+	}
+
+	if imp == nil {
+		t.Fatal("New(OASF) returned a nil importer")
+	}
+}
+
 // --- Run tests ---
 
 func TestImporter_Run_Success(t *testing.T) {

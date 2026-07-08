@@ -24,14 +24,14 @@ const DefaultSchemaVersion = "1.1.0"
 // cannot derive a "name@version" for a source that failed conversion.
 const unknownNameVersion = "(unknown)"
 
-// Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
+// Transformer implements the pipeline.Transformer interface for MCP, A2A, Agent Skill, and OASF sources.
 type Transformer struct {
 	debug         bool
 	authors       []string
 	schemaVersion string
 }
 
-// NewTransformer creates a transformer for MCP, A2A, and Agent Skill pipeline items.
+// NewTransformer creates a transformer for MCP, A2A, Agent Skill, and OASF pipeline items.
 // authors, when non-empty, overrides OASF record authors via translator.WithAuthors.
 // schemaVersion sets the OASF schema version; when empty, DefaultSchemaVersion is used.
 func NewTransformer(debug bool, authors []string, schemaVersion string) *Transformer {
@@ -102,7 +102,8 @@ func (t *Transformer) Transform(ctx context.Context, inputCh <-chan types.Source
 	return outputCh, errCh
 }
 
-// TransformRecord converts a pipeline source item (MCP, A2A, or Agent Skill) to OASF format.
+// TransformRecord converts a pipeline source item (MCP, A2A, or Agent Skill) to OASF format,
+// or validates a source item already in OASF format (passthrough).
 //
 //nolint:gocognit,cyclop // switch per source kind; complexity acceptable
 func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, error) {

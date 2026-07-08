@@ -92,7 +92,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			name: "oasf file import without FilePath is rejected",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeOASF,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
@@ -125,7 +125,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeOASF,
 				FilePath: testFilePath,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 		},
 	}

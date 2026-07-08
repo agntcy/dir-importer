@@ -256,10 +256,37 @@ func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 	}
 }
 
+func TestTransformRecord_AgentSkill_ConversionError_UnknownName(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, nil, "")
+
+	// A non-nil but empty skill struct passes the nil guard, then fails
+	// conversion (no skillMarkdown). With no derivable name the error must fall
+	// back to the "(unknown)" placeholder rather than emitting "@v1.0.0".
+	empty, err := structpb.NewStruct(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = tr.TransformRecord(types.AgentSkillSourceItem(empty))
+	if err == nil {
+		t.Fatal("expected conversion error for empty agent skill struct")
+	}
+
+	if !strings.Contains(err.Error(), "agent skill") {
+		t.Errorf("error should mention agent skill, got %q", err.Error())
+	}
+
+	if !strings.Contains(err.Error(), unknownNameVersion) {
+		t.Errorf("error should use %q placeholder for underivable name, got %q", unknownNameVersion, err.Error())
+	}
+}
+
 func TestTransformRecord_OASF_Success_Passthrough(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false, nil)
+	tr := NewTransformer(false, nil, "")
 
 	// Produce a genuinely valid, decodable OASF record via the existing A2A
 	// conversion path, then feed its Data back in as a SourceKindOASF item —
@@ -289,7 +316,7 @@ func TestTransformRecord_OASF_Success_Passthrough(t *testing.T) {
 func TestTransformRecord_OASF_NilRecord(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false, nil)
+	tr := NewTransformer(false, nil, "")
 
 	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindOASF, OASF: nil})
 	if err == nil {
@@ -304,7 +331,7 @@ func TestTransformRecord_OASF_NilRecord(t *testing.T) {
 func TestTransformRecord_OASF_InvalidRecord_FailsValidation(t *testing.T) {
 	t.Parallel()
 
-	tr := NewTransformer(false, nil)
+	tr := NewTransformer(false, nil, "")
 
 	// No schema_version, no recognizable OASF shape: Decode() must reject it
 	// rather than silently passing malformed data downstream.

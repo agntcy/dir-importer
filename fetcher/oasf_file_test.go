@@ -87,6 +87,15 @@ func TestOASFRecordStructFromMap(t *testing.T) {
 				"modules":        []any{},
 			},
 		},
+		{
+			// A named record whose value graph contains a type structpb cannot
+			// represent (here a channel) must surface a conversion error rather
+			// than panicking or emitting a partial struct. JSON decoding never
+			// produces such a value, so this exercises structFromMap directly.
+			name:        "value structpb cannot represent is rejected",
+			record:      map[string]any{cardNameKey: "named-record", "bad": make(chan int)},
+			wantErrText: "as struct",
+		},
 	}
 
 	for _, tt := range tests {
