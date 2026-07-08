@@ -52,6 +52,8 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		fetch, err = fetcher.NewA2AFileFetcher(cfg.FilePath)
 	case config.ImportTypeAgentSkill:
 		fetch, err = fetcher.NewAgentSkillDirFetcher(cfg.FilePath)
+	case config.ImportTypeOASF:
+		fetch, err = fetcher.NewOASFFileFetcher(cfg.FilePath)
 	default:
 		return nil, fmt.Errorf("unsupported import type: %s", cfg.Type)
 	}

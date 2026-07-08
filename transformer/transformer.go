@@ -161,6 +161,27 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 
 		return record, nil
 
+	case types.SourceKindOASF:
+		if item.OASF == nil {
+			return nil, fmt.Errorf("OASF source item missing record struct")
+		}
+
+		// Passthrough/validator: the input is already in target schema, so there is
+		// nothing to convert. Decode confirms the record is well-formed OASF before
+		// it is allowed further into the pipeline (dedup, enrich, scan, push).
+		record := &corev1.Record{Data: item.OASF}
+
+		if _, err := record.Decode(); err != nil {
+			nv := item.NameVersion()
+			if nv == "" {
+				nv = "(unknown)"
+			}
+
+			return nil, fmt.Errorf("invalid OASF record %s: %w", nv, err)
+		}
+
+		return record, nil
+
 	default:
 		return nil, fmt.Errorf("unknown source kind: %v", item.Kind)
 	}

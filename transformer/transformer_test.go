@@ -256,6 +256,73 @@ func TestTransformRecord_AgentSkill_NilSkill(t *testing.T) {
 	}
 }
 
+func TestTransformRecord_OASF_Success_Passthrough(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, nil)
+
+	// Produce a genuinely valid, decodable OASF record via the existing A2A
+	// conversion path, then feed its Data back in as a SourceKindOASF item —
+	// this is exactly the --dry-run-output re-import scenario the OASF import
+	// type exists for.
+	seed, err := tr.TransformRecord(types.A2ASourceItem(validA2ACard(t)))
+	if err != nil {
+		t.Fatalf("seed TransformRecord: %v", err)
+	}
+
+	rec, err := tr.TransformRecord(types.OASFSourceItem(seed.GetData()))
+	if err != nil {
+		t.Fatalf("TransformRecord: %v", err)
+	}
+
+	if rec == nil || rec.GetData() == nil {
+		t.Fatal("returned record has no data")
+	}
+
+	// Passthrough means the Data struct itself is carried through unchanged,
+	// not rebuilt.
+	if rec.GetData() != seed.GetData() {
+		t.Error("OASF passthrough should carry the input struct through unchanged")
+	}
+}
+
+func TestTransformRecord_OASF_NilRecord(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, nil)
+
+	_, err := tr.TransformRecord(types.SourceItem{Kind: types.SourceKindOASF, OASF: nil})
+	if err == nil {
+		t.Fatal("expected error for nil OASF record")
+	}
+
+	if !strings.Contains(err.Error(), "OASF") {
+		t.Errorf("error should mention OASF, got %q", err.Error())
+	}
+}
+
+func TestTransformRecord_OASF_InvalidRecord_FailsValidation(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTransformer(false, nil)
+
+	// No schema_version, no recognizable OASF shape: Decode() must reject it
+	// rather than silently passing malformed data downstream.
+	garbage, err := structpb.NewStruct(map[string]any{"not_a_real_field": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = tr.TransformRecord(types.OASFSourceItem(garbage))
+	if err == nil {
+		t.Fatal("expected validation error for malformed OASF record")
+	}
+
+	if !strings.Contains(err.Error(), "invalid OASF record") {
+		t.Errorf("error should mention invalid OASF record, got %q", err.Error())
+	}
+}
+
 func TestTransformRecord_UnknownKind(t *testing.T) {
 	t.Parallel()
 

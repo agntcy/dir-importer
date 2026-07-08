@@ -21,6 +21,8 @@ const (
 	SourceKindA2A
 	// SourceKindAgentSkill is a parsed Agent Skill as [structpb.Struct] (see importer/skill package contract).
 	SourceKindAgentSkill
+	// SourceKindOASF is a record already in OASF format as [structpb.Struct] (e.g. --dry-run output re-imported).
+	SourceKindOASF
 )
 
 // SourceItem is one record from fetch through dedup before OASF transformation.
@@ -30,6 +32,7 @@ type SourceItem struct {
 	MCP   mcpapiv0.ServerResponse
 	A2A   *structpb.Struct
 	Skill *structpb.Struct
+	OASF  *structpb.Struct
 }
 
 // MCPSourceItem wraps an MCP server response for the pipeline.
@@ -47,6 +50,11 @@ func AgentSkillSourceItem(skill *structpb.Struct) SourceItem {
 	return SourceItem{Kind: SourceKindAgentSkill, Skill: skill}
 }
 
+// OASFSourceItem wraps a record already in OASF format as structpb.Struct for the pipeline.
+func OASFSourceItem(record *structpb.Struct) SourceItem {
+	return SourceItem{Kind: SourceKindOASF, OASF: record}
+}
+
 // NameVersion returns "name@version" for deduplication, or "" if it cannot be derived.
 func (s SourceItem) NameVersion() string {
 	switch s.Kind {
@@ -59,7 +67,7 @@ func (s SourceItem) NameVersion() string {
 			return ""
 		}
 
-		name, version := a2aNameVersionFields(s.A2A)
+		name, version := topLevelNameVersionFields(s.A2A)
 		if name == "" {
 			return ""
 		}
@@ -85,12 +93,30 @@ func (s SourceItem) NameVersion() string {
 		}
 
 		return fmt.Sprintf("%s@%s", name, version)
+
+	case SourceKindOASF:
+		if s.OASF == nil {
+			return ""
+		}
+
+		name, version := topLevelNameVersionFields(s.OASF)
+		if name == "" {
+			return ""
+		}
+
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		return fmt.Sprintf("%s@%s", name, version)
 	}
 
 	return ""
 }
 
-func a2aNameVersionFields(card *structpb.Struct) (string, string) {
+// topLevelNameVersionFields extracts the top-level "name"/"version" string
+// fields shared by A2A AgentCard and OASF record payloads.
+func topLevelNameVersionFields(card *structpb.Struct) (string, string) {
 	if card == nil {
 		return "", ""
 	}

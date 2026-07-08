@@ -53,6 +53,34 @@ func TestSourceItem_NameVersion_A2A(t *testing.T) {
 	}
 }
 
+func TestSourceItem_NameVersion_OASF(t *testing.T) {
+	t.Parallel()
+
+	st, err := structpb.NewStruct(map[string]any{fieldName: "oasf-agent", "version": "2.1.0", "schema_version": "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := OASFSourceItem(st)
+	if got := s.NameVersion(); got != "oasf-agent@2.1.0" {
+		t.Errorf("NameVersion = %q, want oasf-agent@2.1.0", got)
+	}
+
+	st2, err := structpb.NewStruct(map[string]any{fieldName: "onlyname"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := OASFSourceItem(st2)
+	if got := s2.NameVersion(); got != "onlyname@v1.0.0" {
+		t.Errorf("default version: got %q, want onlyname@v1.0.0", got)
+	}
+
+	if OASFSourceItem(nil).NameVersion() != "" {
+		t.Error("nil struct should give empty NameVersion")
+	}
+}
+
 func TestSourceItem_NameVersion_AgentSkill(t *testing.T) {
 	t.Parallel()
 

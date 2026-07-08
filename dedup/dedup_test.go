@@ -225,6 +225,17 @@ func TestModulesByImportType_AgentSkillType(t *testing.T) {
 	}
 }
 
+// ImportTypeOASF deliberately has no entry in modulesByImportType: an OASF
+// record may carry any module, so buildCache's "unknown import type" fallback
+// (query every known module) is the intended behavior, not an oversight.
+func TestModulesByImportType_OASFTypeHasNoEntry(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := modulesByImportType[config.ImportTypeOASF]; ok {
+		t.Error("ImportTypeOASF should have no entry in modulesByImportType (relies on the all-modules fallback in buildCache)")
+	}
+}
+
 func TestFilterDuplicates_A2ASkipsKnownDuplicate(t *testing.T) {
 	t.Parallel()
 
