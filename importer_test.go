@@ -1011,15 +1011,16 @@ func (stubNewClient) Push(_ context.Context, _ *corev1.Record) (*corev1.RecordRe
 }
 
 func (stubNewClient) SearchCIDs(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
-	resCh := make(chan *searchv1.SearchCIDsResponse)
-	errCh := make(chan error)
+	// An already-closed doneCh makes SearchCIDs report "no results" immediately,
+	// which is all dedup construction needs. resCh/errCh stay open and unread.
 	doneCh := make(chan struct{})
+	close(doneCh)
 
-	go func() {
-		close(doneCh)
-	}()
-
-	return &stubNewStreamResult{resCh: resCh, errCh: errCh, doneCh: doneCh}, nil
+	return &stubNewStreamResult{
+		resCh:  make(chan *searchv1.SearchCIDsResponse),
+		errCh:  make(chan error),
+		doneCh: doneCh,
+	}, nil
 }
 
 func (stubNewClient) PullBatch(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {

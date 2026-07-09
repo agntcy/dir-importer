@@ -25,9 +25,9 @@ var DefaultSkillsPromptTemplate string
 var DefaultDomainsPromptTemplate string
 
 // Config selects the enrichment method for the pipeline stage. The three
-// methods are mutually exclusive and share equal standing; exactly one should be
-// set. importer.New selects in the order Static, Extractor, LLM, and errors when
-// none is configured.
+// methods are mutually exclusive and share equal standing; exactly one must be
+// set (enforced by Validate). importer.New selects in the order Static,
+// Extractor, LLM, and errors when none is configured.
 type Config struct {
 	Static    *StaticConfig    // Fixed skills/domains stamped on every record.
 	Extractor *ExtractorConfig // Deterministic, in-process taxonomy extractor.
@@ -80,19 +80,45 @@ type TaxonomyClass struct {
 }
 
 // Validate checks that exactly one enrichment method is configured and that the
-// configured method is itself valid. The precedence mirrors importer.New:
-// Static, then Extractor, then LLM.
+// configured method is itself valid. Setting more than one method is rejected
+// (it would make selection ambiguous), and setting none is rejected too.
 func (c *Config) Validate() error {
+	switch c.methodsSet() {
+	case 0:
+		return errors.New("no enrichment method configured (set one of Static, Extractor, LLM)")
+	case 1:
+		// Exactly one set — validate it below.
+	default:
+		return errors.New("multiple enrichment methods configured (set only one of Static, Extractor, LLM)")
+	}
+
 	switch {
 	case c.Static != nil:
 		return c.Static.Validate()
 	case c.Extractor != nil:
 		return c.Extractor.Validate()
-	case c.LLM != nil:
-		return c.LLM.Validate()
 	default:
-		return errors.New("no enrichment method configured (set one of Static, Extractor, LLM)")
+		return c.LLM.Validate()
 	}
+}
+
+// methodsSet counts how many enrichment methods are configured.
+func (c *Config) methodsSet() int {
+	n := 0
+
+	if c.Static != nil {
+		n++
+	}
+
+	if c.Extractor != nil {
+		n++
+	}
+
+	if c.LLM != nil {
+		n++
+	}
+
+	return n
 }
 
 // Validate enforces that every taxonomy entry carries at least one identifier

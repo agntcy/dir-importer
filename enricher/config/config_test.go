@@ -101,6 +101,53 @@ func TestConfigValidate_DelegatesToConfiguredMethod(t *testing.T) {
 	}
 }
 
+// Setting more than one method is ambiguous and must be rejected rather than
+// silently resolved by precedence.
+func TestConfigValidate_RejectsMultipleMethods(t *testing.T) {
+	t.Parallel()
+
+	llm := validLLM()
+
+	cases := []struct {
+		name string
+		cfg  enricherconfig.Config
+	}{
+		{
+			name: "static and extractor",
+			cfg: enricherconfig.Config{
+				Static:    &enricherconfig.StaticConfig{},
+				Extractor: &enricherconfig.ExtractorConfig{Extractor: stubExtractor{}},
+			},
+		},
+		{
+			name: "static and llm",
+			cfg: enricherconfig.Config{
+				Static: &enricherconfig.StaticConfig{},
+				LLM:    &llm,
+			},
+		},
+		{
+			name: "all three",
+			cfg: enricherconfig.Config{
+				Static:    &enricherconfig.StaticConfig{},
+				Extractor: &enricherconfig.ExtractorConfig{Extractor: stubExtractor{}},
+				LLM:       &llm,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "multiple enrichment methods") {
+				t.Fatalf("expected multiple-methods error, got %v", err)
+			}
+		})
+	}
+}
+
 // --- LLM config ---------------------------------------------------------------
 
 // LLMConfig.Validate delegates the tool-host check to toolhost.Config.Validate();

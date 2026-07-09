@@ -43,7 +43,7 @@ func NewExtractorEnricher(cfg *enricherconfig.ExtractorConfig) (*ExtractorEnrich
 // Enrich reads records from inputCh, classifies each via the extractor, writes
 // the resulting skills and domains, and forwards them.
 //
-//nolint:dupl // Enrich loop mirrors Enricher.Enrich — same goroutine scaffold, different enrichRecord implementation.
+//nolint:dupl // Enrich loop mirrors LLMEnricher.Enrich — same goroutine scaffold, different enrichRecord implementation.
 func (ee *ExtractorEnricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, result *types.Result) (<-chan *corev1.Record, <-chan error) {
 	out := make(chan *corev1.Record)
 	errCh := make(chan error)

@@ -89,9 +89,10 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 	}, nil
 }
 
-// newEnricher selects the enrichment method from cfg. Exactly one of Static,
-// Extractor, or LLM must be set (checked in that order); it errors when none is
-// configured.
+// newEnricher builds the enricher for the method configured in cfg, selecting by
+// precedence (Static, then Extractor, then LLM) and erroring when none is set.
+// Config.Validate rejects configs with more than one method set; callers that
+// skip validation and set several will get the first by this precedence.
 func newEnricher(ctx context.Context, cfg enricherconfig.Config) (types.Enricher, error) {
 	switch {
 	case cfg.Static != nil:
