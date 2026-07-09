@@ -76,6 +76,8 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 }
 
 // Enrich reads records from inputCh, enriches each, and sends them on the returned channel.
+//
+//nolint:dupl // Enrich loop mirrors ExtractorEnricher.Enrich — same goroutine scaffold, different enrichRecord implementation.
 func (e *Enricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, result *types.Result) (<-chan *corev1.Record, <-chan error) {
 	out := make(chan *corev1.Record)
 	errCh := make(chan error)

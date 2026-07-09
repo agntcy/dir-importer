@@ -13,9 +13,12 @@ import (
 	"testing"
 
 	"github.com/agntcy/dir-importer/config"
+	"github.com/agntcy/dir-importer/enricher"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
+	searchv1 "github.com/agntcy/dir/api/search/v1"
+	"github.com/agntcy/dir/client/streaming"
 	mcpapiv0 "github.com/modelcontextprotocol/registry/pkg/api/v0"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -994,6 +997,79 @@ func TestWriteRecords_SkipsNilRecords(t *testing.T) {
 
 	if len(entries) != 1 {
 		t.Errorf("got %d files, want 1 (nils should be skipped)", len(entries))
+	}
+}
+
+// --- New() enricher-selection tests ---
+
+// stubNewClient implements config.ClientInterface for New() construction tests.
+// SearchCIDs returns an immediately-done empty stream so dedup.NewDuplicateChecker succeeds.
+type stubNewClient struct{}
+
+func (stubNewClient) Push(_ context.Context, _ *corev1.Record) (*corev1.RecordRef, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stubNewClient) SearchCIDs(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+	resCh := make(chan *searchv1.SearchCIDsResponse)
+	errCh := make(chan error)
+	doneCh := make(chan struct{})
+
+	go func() {
+		close(doneCh)
+	}()
+
+	return &stubNewStreamResult{resCh: resCh, errCh: errCh, doneCh: doneCh}, nil
+}
+
+func (stubNewClient) PullBatch(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+	return nil, nil
+}
+
+type stubNewStreamResult struct {
+	resCh  chan *searchv1.SearchCIDsResponse
+	errCh  chan error
+	doneCh chan struct{}
+}
+
+func (r *stubNewStreamResult) ResCh() <-chan *searchv1.SearchCIDsResponse { return r.resCh }
+func (r *stubNewStreamResult) ErrCh() <-chan error                        { return r.errCh }
+func (r *stubNewStreamResult) DoneCh() <-chan struct{}                    { return r.doneCh }
+
+// stubExtractor implements enricher.RecordExtractor for New() construction tests.
+type stubExtractor struct{}
+
+func (stubExtractor) Extract(_ context.Context, _ string) (enricher.ExtractResult, error) {
+	return enricher.ExtractResult{}, nil
+}
+
+// TestNew_SelectsExtractorEnricher proves that when cfg.Extractor is set (and
+// SkipEnricher is false), New succeeds without any ToolHost/LLM config.
+func TestNew_SelectsExtractorEnricher(t *testing.T) {
+	t.Parallel()
+
+	// Write a minimal valid MCP JSON file so NewMCPFileFetcher accepts the path.
+	dir := t.TempDir()
+	mcpFile := filepath.Join(dir, "server.json")
+
+	mcpJSON := `{"name":"test-server","version":"1.0.0"}`
+	if err := os.WriteFile(mcpFile, []byte(mcpJSON), 0o600); err != nil {
+		t.Fatalf("write temp MCP file: %v", err)
+	}
+
+	cfg := config.Config{
+		Type:      config.ImportTypeMCP,
+		FilePath:  mcpFile,
+		Extractor: stubExtractor{},
+	}
+
+	imp, err := New(context.Background(), stubNewClient{}, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if imp == nil {
+		t.Fatal("expected a non-nil importer")
 	}
 }
 

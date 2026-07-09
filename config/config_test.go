@@ -4,11 +4,13 @@
 package config_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	importerconfig "github.com/agntcy/dir-importer/config"
+	"github.com/agntcy/dir-importer/enricher"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 )
 
@@ -162,5 +164,28 @@ func TestValidate_SkipEnricherShortCircuitsLLMConfig(t *testing.T) {
 	}
 	if err := cfgWithSkip.Validate(); err != nil {
 		t.Fatalf("expected SkipEnricher to bypass LLM validation, got %v", err)
+	}
+}
+
+// stubExtractor implements enricher.RecordExtractor for validation tests.
+type stubExtractor struct{}
+
+func (stubExtractor) Extract(_ context.Context, _ string) (enricher.ExtractResult, error) {
+	return enricher.ExtractResult{}, nil
+}
+
+// TestValidate_ExtractorMode_SkipsLLMValidation verifies that injecting an
+// Extractor bypasses the LLM/MCP enricher validation (no tool-host config
+// required), while SkipEnricher is not set.
+func TestValidate_ExtractorMode_SkipsLLMValidation(t *testing.T) {
+	t.Parallel()
+
+	cfg := importerconfig.Config{
+		Type:      importerconfig.ImportTypeMCP,
+		FilePath:  testFilePath,
+		Extractor: stubExtractor{},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected Extractor mode to bypass LLM validation, got %v", err)
 	}
 }

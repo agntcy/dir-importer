@@ -36,6 +36,10 @@ type Config struct {
 }
 
 // Validate checks if the configuration is valid.
+//
+// It validates the LLM/MCP path. When the importer runs in Extractor mode (an
+// Extractor is injected via the top-level config), the caller skips this
+// validation entirely — the LLM/MCP configuration is not required there.
 func (c *Config) Validate() error {
 	if c.SkipEnricher {
 		return c.validateSkipEnricher()

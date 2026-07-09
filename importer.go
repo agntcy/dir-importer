@@ -68,9 +68,15 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 
 	var e types.Enricher
 
-	if cfg.Enricher.SkipEnricher {
+	switch {
+	case cfg.Enricher.SkipEnricher:
 		e = enricher.NewStaticEnricher(cfg.Enricher.Skills, cfg.Enricher.Domains)
-	} else {
+	case cfg.Extractor != nil:
+		e, err = enricher.NewExtractorEnricher(cfg.Extractor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create extractor enricher: %w", err)
+		}
+	default:
 		e, err = enricher.New(ctx, cfg.Enricher)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create enricher: %w", err)

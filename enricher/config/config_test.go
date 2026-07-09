@@ -422,3 +422,12 @@ func TestValidate_RequestsPerMinuteMustBePositive(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_LLMMode_StillRequiresToolHost(t *testing.T) {
+	t.Parallel()
+
+	cfg := enricherconfig.Config{RequestsPerMinute: 2}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("LLM mode should fail validation without tool host config")
+	}
+}
