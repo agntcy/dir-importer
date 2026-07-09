@@ -28,8 +28,9 @@ const (
 	enrichmentTimeout          = 5 * time.Minute
 )
 
-// Enricher fills OASF skills and domains on agent records using the tool host and prompt templates.
-type Enricher struct {
+// LLMEnricher fills OASF skills and domains on agent records using an LLM agent
+// talking to an MCP tool host, driven by prompt templates.
+type LLMEnricher struct {
 	toolHost       *toolhost.Host
 	skillsPrompt   string
 	domainsPrompt  string
@@ -44,10 +45,15 @@ type EnrichedField struct {
 	Reasoning  string  `json:"reasoning"`
 }
 
-// New builds an Enricher from cfg. cfg.Validate is invoked explicitly here so
-// callers cannot construct a half-configured Enricher (e.g. via direct struct
-// literal) — the alternative was a runtime panic deeper in the toolhost setup.
-func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
+// NewLLMEnricher builds an LLMEnricher from cfg. cfg.Validate is invoked
+// explicitly here so callers cannot construct a half-configured enricher (e.g.
+// via direct struct literal) — the alternative was a runtime panic deeper in the
+// toolhost setup.
+func NewLLMEnricher(ctx context.Context, cfg *enricherconfig.LLMConfig) (*LLMEnricher, error) {
+	if cfg == nil {
+		return nil, errors.New("llm enricher: config must not be nil")
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("enricher config: %w", err)
 	}
@@ -67,7 +73,7 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 		return nil, fmt.Errorf("enricher tool host: %w", err)
 	}
 
-	return &Enricher{
+	return &LLMEnricher{
 		toolHost:       th,
 		skillsPrompt:   skillsPrompt,
 		domainsPrompt:  domainsPrompt,
@@ -78,7 +84,7 @@ func New(ctx context.Context, cfg enricherconfig.Config) (*Enricher, error) {
 // Enrich reads records from inputCh, enriches each, and sends them on the returned channel.
 //
 //nolint:dupl // Enrich loop mirrors ExtractorEnricher.Enrich — same goroutine scaffold, different enrichRecord implementation.
-func (e *Enricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, result *types.Result) (<-chan *corev1.Record, <-chan error) {
+func (e *LLMEnricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, result *types.Result) (<-chan *corev1.Record, <-chan error) {
 	out := make(chan *corev1.Record)
 	errCh := make(chan error)
 
@@ -117,7 +123,7 @@ func (e *Enricher) Enrich(ctx context.Context, inputCh <-chan *corev1.Record, re
 	return out, errCh
 }
 
-func (e *Enricher) enrichRecord(ctx context.Context, s *structpb.Struct) error {
+func (e *LLMEnricher) enrichRecord(ctx context.Context, s *structpb.Struct) error {
 	wrapped := &corev1.Record{Data: s}
 
 	decoded, err := wrapped.Decode()
@@ -157,7 +163,7 @@ func (e *Enricher) enrichRecord(ctx context.Context, s *structpb.Struct) error {
 }
 
 //nolint:dupl // Parallel skills vs domains enrichment; a shared helper would blur separate flows.
-func (e *Enricher) enrichSkills(ctx context.Context, rec *typesv1.Record) (*typesv1.Record, error) {
+func (e *LLMEnricher) enrichSkills(ctx context.Context, rec *typesv1.Record) (*typesv1.Record, error) {
 	payload, err := json.Marshal(rec)
 	if err != nil {
 		return nil, fmt.Errorf("marshal record: %w", err)
@@ -188,7 +194,7 @@ func (e *Enricher) enrichSkills(ctx context.Context, rec *typesv1.Record) (*type
 }
 
 //nolint:dupl // Parallel skills vs domains enrichment; a shared helper would blur separate flows.
-func (e *Enricher) enrichDomains(ctx context.Context, rec *typesv1.Record) (*typesv1.Record, error) {
+func (e *LLMEnricher) enrichDomains(ctx context.Context, rec *typesv1.Record) (*typesv1.Record, error) {
 	payload, err := json.Marshal(rec)
 	if err != nil {
 		return nil, fmt.Errorf("marshal record: %w", err)
@@ -219,7 +225,7 @@ func (e *Enricher) enrichDomains(ctx context.Context, rec *typesv1.Record) (*typ
 }
 
 // complete sends promptTemplate + JSON record to the LLM (rate-limited).
-func (e *Enricher) complete(ctx context.Context, promptTemplate string, recordJSON []byte) (string, error) {
+func (e *LLMEnricher) complete(ctx context.Context, promptTemplate string, recordJSON []byte) (string, error) {
 	prompt := promptTemplate + string(recordJSON)
 
 	if err := e.requestLimiter.Wait(ctx); err != nil {
@@ -258,66 +264,4 @@ func parseDomainsJSON(response string) ([]EnrichedField, error) {
 	}
 
 	return parsed.Domains, nil
-}
-
-func setStructSkills(s *structpb.Struct, skills []*typesv1.Skill) error {
-	if s.Fields == nil {
-		return errors.New("record struct has no fields")
-	}
-
-	s.Fields["skills"] = structpb.NewListValue(skillsToListValue(skills))
-
-	return nil
-}
-
-func setStructDomains(s *structpb.Struct, domains []*typesv1.Domain) error {
-	if s.Fields == nil {
-		return errors.New("record struct has no fields")
-	}
-
-	s.Fields["domains"] = structpb.NewListValue(domainsToListValue(domains))
-
-	return nil
-}
-
-// skillsToListValue / domainsToListValue centralize the name/id omission
-// rules so the LLM-driven enricher and the static-enrichment path produce
-// wire-identical output. Name is omitted when empty, Id when zero; nil
-// entries are tolerated via proto's nil-safe getters.
-func skillsToListValue(skills []*typesv1.Skill) *structpb.ListValue {
-	lv := &structpb.ListValue{Values: make([]*structpb.Value, 0, len(skills))}
-
-	for _, sk := range skills {
-		st := &structpb.Struct{Fields: map[string]*structpb.Value{}}
-		if sk.GetName() != "" {
-			st.Fields["name"] = structpb.NewStringValue(sk.GetName())
-		}
-
-		if sk.GetId() != 0 {
-			st.Fields["id"] = structpb.NewNumberValue(float64(sk.GetId()))
-		}
-
-		lv.Values = append(lv.Values, structpb.NewStructValue(st))
-	}
-
-	return lv
-}
-
-func domainsToListValue(domains []*typesv1.Domain) *structpb.ListValue {
-	lv := &structpb.ListValue{Values: make([]*structpb.Value, 0, len(domains))}
-
-	for _, d := range domains {
-		st := &structpb.Struct{Fields: map[string]*structpb.Value{}}
-		if d.GetName() != "" {
-			st.Fields["name"] = structpb.NewStringValue(d.GetName())
-		}
-
-		if d.GetId() != 0 {
-			st.Fields["id"] = structpb.NewNumberValue(float64(d.GetId()))
-		}
-
-		lv.Values = append(lv.Values, structpb.NewStructValue(st))
-	}
-
-	return lv
 }

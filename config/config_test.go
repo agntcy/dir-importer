@@ -10,7 +10,6 @@ import (
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
 	importerconfig "github.com/agntcy/dir-importer/config"
-	"github.com/agntcy/dir-importer/enricher"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 )
 
@@ -19,13 +18,13 @@ const (
 	testFilePath        = "/some/path.json"
 )
 
-// skipEnricher is the minimum [enricherconfig.Config] that passes Validate()
-// without an LLM: it short-circuits the tool-host / template / rate-limit
-// checks, letting these tests focus on the importer-level fields under test
+// staticEnricher is the minimum [enricherconfig.Config] that passes Validate()
+// without an LLM: the static method needs no tool-host / template / rate-limit
+// config, letting these tests focus on the importer-level fields under test
 // (Type, FilePath, RegistryURL) instead of reconstructing a full LLM config
 // per case.
-func skipEnricher() enricherconfig.Config {
-	return enricherconfig.Config{SkipEnricher: true}
+func staticEnricher() enricherconfig.Config {
+	return enricherconfig.Config{Static: &enricherconfig.StaticConfig{}}
 }
 
 func TestValidate_TypeDispatch(t *testing.T) {
@@ -38,14 +37,14 @@ func TestValidate_TypeDispatch(t *testing.T) {
 	}{
 		{
 			name:        "empty type is rejected",
-			cfg:         importerconfig.Config{Enricher: skipEnricher()},
+			cfg:         importerconfig.Config{Enricher: staticEnricher()},
 			wantErrText: "import type is required",
 		},
 		{
 			name: "unsupported type is rejected",
 			cfg: importerconfig.Config{
 				Type:     "made-up",
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: "unsupported import type",
 		},
@@ -53,7 +52,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			name: "mcp-registry without RegistryURL is rejected",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeMCPRegistry,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: "registry URL is required",
 		},
@@ -62,14 +61,14 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			cfg: importerconfig.Config{
 				Type:        importerconfig.ImportTypeMCPRegistry,
 				RegistryURL: "https://example.invalid/v0",
-				Enricher:    skipEnricher(),
+				Enricher:    staticEnricher(),
 			},
 		},
 		{
 			name: "mcp file import without FilePath is rejected",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeMCP,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
@@ -77,7 +76,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			name: "a2a file import without FilePath is rejected",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeA2A,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
@@ -85,7 +84,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			name: "agent-skill import without FilePath is rejected",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeAgentSkill,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 			wantErrText: errFilePathRequired,
 		},
@@ -94,7 +93,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeMCP,
 				FilePath: testFilePath,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 		},
 		{
@@ -102,7 +101,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeA2A,
 				FilePath: testFilePath,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 		},
 		{
@@ -110,7 +109,7 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeAgentSkill,
 				FilePath: testFilePath,
-				Enricher: skipEnricher(),
+				Enricher: staticEnricher(),
 			},
 		},
 	}
@@ -139,53 +138,55 @@ func TestValidate_TypeDispatch(t *testing.T) {
 	}
 }
 
-// SkipEnricher must let the importer-level Validate succeed without an LLM
-// configuration; the static-enrichment path doesn't use a tool host. The
-// matching un-skipped config (with the same empty ToolHost) must fail, to
-// prove the short-circuit is doing the work.
-func TestValidate_SkipEnricherShortCircuitsLLMConfig(t *testing.T) {
+// The static method must let the importer-level Validate succeed without an LLM
+// configuration; it doesn't use a tool host. A config with no enrichment method
+// set must fail, proving Validate requires exactly one method.
+func TestValidate_StaticMethodSkipsLLMConfig(t *testing.T) {
 	t.Parallel()
 
-	cfgWithoutSkip := importerconfig.Config{
+	cfgNoMethod := importerconfig.Config{
 		Type:     importerconfig.ImportTypeMCP,
 		FilePath: testFilePath,
 	}
-	if err := cfgWithoutSkip.Validate(); err == nil {
-		t.Fatal("expected enricher config validation to fail without SkipEnricher, got nil")
+	if err := cfgNoMethod.Validate(); err == nil {
+		t.Fatal("expected validation to fail when no enrichment method is configured, got nil")
 	}
 
-	cfgWithSkip := importerconfig.Config{
+	cfgStatic := importerconfig.Config{
 		Type:     importerconfig.ImportTypeMCP,
 		FilePath: testFilePath,
 		Enricher: enricherconfig.Config{
-			SkipEnricher: true,
-			Skills:       []*typesv1.Skill{{Name: "skill-a", Id: 1}},
+			Static: &enricherconfig.StaticConfig{
+				Skills: []*typesv1.Skill{{Name: "skill-a", Id: 1}},
+			},
 		},
 	}
-	if err := cfgWithSkip.Validate(); err != nil {
-		t.Fatalf("expected SkipEnricher to bypass LLM validation, got %v", err)
+	if err := cfgStatic.Validate(); err != nil {
+		t.Fatalf("expected static method to bypass LLM validation, got %v", err)
 	}
 }
 
-// stubExtractor implements enricher.RecordExtractor for validation tests.
+// stubExtractor implements enricherconfig.RecordExtractor for validation tests.
 type stubExtractor struct{}
 
-func (stubExtractor) Extract(_ context.Context, _ string) (enricher.ExtractResult, error) {
-	return enricher.ExtractResult{}, nil
+func (stubExtractor) Extract(_ context.Context, _ string) (enricherconfig.ExtractResult, error) {
+	return enricherconfig.ExtractResult{}, nil
 }
 
-// TestValidate_ExtractorMode_SkipsLLMValidation verifies that injecting an
-// Extractor bypasses the LLM/MCP enricher validation (no tool-host config
-// required), while SkipEnricher is not set.
-func TestValidate_ExtractorMode_SkipsLLMValidation(t *testing.T) {
+// TestValidate_ExtractorMethodSkipsLLMConfig verifies that a configured
+// Extractor method bypasses the LLM/MCP validation (no tool-host config
+// required).
+func TestValidate_ExtractorMethodSkipsLLMConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := importerconfig.Config{
-		Type:      importerconfig.ImportTypeMCP,
-		FilePath:  testFilePath,
-		Extractor: stubExtractor{},
+		Type:     importerconfig.ImportTypeMCP,
+		FilePath: testFilePath,
+		Enricher: enricherconfig.Config{
+			Extractor: &enricherconfig.ExtractorConfig{Extractor: stubExtractor{}},
+		},
 	}
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected Extractor mode to bypass LLM validation, got %v", err)
+		t.Fatalf("expected Extractor method to bypass LLM validation, got %v", err)
 	}
 }

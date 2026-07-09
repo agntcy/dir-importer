@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/oasf-sdk/pkg/translator"
@@ -22,14 +23,14 @@ const testSkillName = "skill-1"
 // (or a canned error). It stands in for the oasf-sdk extractor in tests.
 type fakeExtractor struct {
 	gotText string
-	result  ExtractResult
+	result  enricherconfig.ExtractResult
 	err     error
 }
 
-func (f *fakeExtractor) Extract(_ context.Context, text string) (ExtractResult, error) {
+func (f *fakeExtractor) Extract(_ context.Context, text string) (enricherconfig.ExtractResult, error) {
 	f.gotText = text
 	if f.err != nil {
-		return ExtractResult{}, f.err
+		return enricherconfig.ExtractResult{}, f.err
 	}
 
 	return f.result, nil
@@ -44,23 +45,27 @@ func mcpRecord(name, description string) *corev1.Record {
 	}}}
 }
 
-func TestNewExtractorEnricher_NilExtractor(t *testing.T) {
+func TestNewExtractorEnricher_RejectsNilConfigAndExtractor(t *testing.T) {
 	t.Parallel()
 
 	if _, err := NewExtractorEnricher(nil); err == nil {
-		t.Fatal("expected error for nil extractor")
+		t.Fatal("expected error for nil config")
+	}
+
+	if _, err := NewExtractorEnricher(&enricherconfig.ExtractorConfig{}); err == nil {
+		t.Fatal("expected error for nil extractor in config")
 	}
 }
 
 func TestExtractorEnricher_WritesSkillsAndDomains(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeExtractor{result: ExtractResult{
-		Skills:  []TaxonomyClass{{Name: testSkillName, ID: 100}},
-		Domains: []TaxonomyClass{{Name: "domain-1", ID: 200}},
+	fake := &fakeExtractor{result: enricherconfig.ExtractResult{
+		Skills:  []enricherconfig.TaxonomyClass{{Name: testSkillName, ID: 100}},
+		Domains: []enricherconfig.TaxonomyClass{{Name: "domain-1", ID: 200}},
 	}}
 
-	ee, err := NewExtractorEnricher(fake)
+	ee, err := NewExtractorEnricher(&enricherconfig.ExtractorConfig{Extractor: fake})
 	if err != nil {
 		t.Fatalf("NewExtractorEnricher: %v", err)
 	}
@@ -94,11 +99,11 @@ func TestExtractorEnricher_WritesSkillsAndDomains(t *testing.T) {
 func TestExtractorEnricher_MCPUsesNameAndDescription(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeExtractor{result: ExtractResult{
-		Skills: []TaxonomyClass{{Name: "s", ID: 1}},
+	fake := &fakeExtractor{result: enricherconfig.ExtractResult{
+		Skills: []enricherconfig.TaxonomyClass{{Name: "s", ID: 1}},
 	}}
 
-	ee, _ := NewExtractorEnricher(fake)
+	ee, _ := NewExtractorEnricher(&enricherconfig.ExtractorConfig{Extractor: fake})
 
 	in := make(chan *corev1.Record, 1)
 	in <- mcpRecord("agent-name", "agent description")
@@ -117,7 +122,7 @@ func TestExtractorEnricher_ExtractError(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeExtractor{err: errors.New("boom")}
-	ee, _ := NewExtractorEnricher(fake)
+	ee, _ := NewExtractorEnricher(&enricherconfig.ExtractorConfig{Extractor: fake})
 
 	in := make(chan *corev1.Record, 1)
 	in <- mcpRecord("agent-1", "desc")
@@ -141,7 +146,7 @@ func TestExtractorEnricher_EmptyTextFails(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeExtractor{}
-	ee, _ := NewExtractorEnricher(fake)
+	ee, _ := NewExtractorEnricher(&enricherconfig.ExtractorConfig{Extractor: fake})
 
 	in := make(chan *corev1.Record, 1)
 	in <- mcpRecord("", "") // no text at all
@@ -176,8 +181,8 @@ func TestExtractorEnricher_AgentSkillUsesSkillMarkdown(t *testing.T) {
 		t.Fatalf("SkillMarkdownToRecord: %v", err)
 	}
 
-	fake := &fakeExtractor{result: ExtractResult{Skills: []TaxonomyClass{{Name: "s", ID: 1}}}}
-	ee, _ := NewExtractorEnricher(fake)
+	fake := &fakeExtractor{result: enricherconfig.ExtractResult{Skills: []enricherconfig.TaxonomyClass{{Name: "s", ID: 1}}}}
+	ee, _ := NewExtractorEnricher(&enricherconfig.ExtractorConfig{Extractor: fake})
 
 	in := make(chan *corev1.Record, 1)
 	in <- &corev1.Record{Data: data}

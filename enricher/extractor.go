@@ -10,51 +10,34 @@ import (
 	"strings"
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"github.com/agntcy/oasf-sdk/pkg/translator"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// RecordExtractor deterministically classifies record text into OASF skills and
-// domains, without an LLM. Implementations should scope extraction to the latest
-// OASF version (enrich-on-import semantics). It is satisfied by a caller-side
-// adapter over the oasf-sdk extractor and is trivially faked in tests. Keeping
-// this interface dir-importer-local keeps the oasf-sdk extractor package (and its
-// ML dependencies) out of dir-importer's build graph.
-type RecordExtractor interface {
-	// Extract classifies text into OASF skills and domains.
-	Extract(ctx context.Context, text string) (ExtractResult, error)
-}
-
-// ExtractResult holds the skills and domains a RecordExtractor recommends.
-type ExtractResult struct {
-	Skills  []TaxonomyClass
-	Domains []TaxonomyClass
-}
-
-// TaxonomyClass is a single OASF skill or domain identified by name and/or id.
-type TaxonomyClass struct {
-	ID   uint32 // OASF numeric id
-	Name string // hierarchical OASF name
-}
-
 // ExtractorEnricher enriches records with OASF skills and domains using a
-// deterministic RecordExtractor instead of an LLM. The extractor is provided by
-// the caller (already provisioned) and injected behind the RecordExtractor
-// interface so it can be faked in tests.
+// deterministic extractor instead of an LLM. The extractor is provided by the
+// caller (already provisioned) and injected behind the RecordExtractor interface
+// (defined in enricherconfig) so it can be faked in tests.
 type ExtractorEnricher struct {
-	ext RecordExtractor
+	ext enricherconfig.RecordExtractor
 }
 
-// NewExtractorEnricher returns an ExtractorEnricher backed by ext. It errors if
-// ext is nil, so callers cannot construct a non-functional enricher.
-func NewExtractorEnricher(ext RecordExtractor) (*ExtractorEnricher, error) {
-	if ext == nil {
-		return nil, errors.New("extractor enricher: extractor must not be nil")
+// NewExtractorEnricher returns an ExtractorEnricher backed by cfg's extractor.
+// It errors on a nil or invalid config (e.g. a nil extractor), so callers cannot
+// construct a non-functional enricher.
+func NewExtractorEnricher(cfg *enricherconfig.ExtractorConfig) (*ExtractorEnricher, error) {
+	if cfg == nil {
+		return nil, errors.New("extractor enricher: config must not be nil")
 	}
 
-	return &ExtractorEnricher{ext: ext}, nil
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("extractor enricher config: %w", err)
+	}
+
+	return &ExtractorEnricher{ext: cfg.Extractor}, nil
 }
 
 // Enrich reads records from inputCh, classifies each via the extractor, writes

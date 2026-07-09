@@ -4,6 +4,7 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func writeFile(t *testing.T, name, contents string) string {
 }
 
 // validToolHost returns a [toolhost.Config] that passes its own Validate(),
-// so each enricher-config test can focus on the field under test instead of
+// so each LLM-config test can focus on the field under test instead of
 // reconstructing a full tool-host fixture per case.
 func validToolHost() toolhost.Config {
 	return toolhost.Config{
@@ -47,10 +48,65 @@ func validToolHost() toolhost.Config {
 	}
 }
 
-// Validate delegates the tool-host check to toolhost.Config.Validate(); a
-// broken ToolHost must surface as an enricher-config validation failure
-// (no silent acceptance, no panic deeper in toolhost.New).
-func TestValidate_DelegatesToolHostValidation(t *testing.T) {
+// validLLM returns an [enricherconfig.LLMConfig] that passes Validate().
+func validLLM() enricherconfig.LLMConfig {
+	return enricherconfig.LLMConfig{
+		ToolHost:          validToolHost(),
+		RequestsPerMinute: 1,
+	}
+}
+
+// stubExtractor implements enricherconfig.RecordExtractor for config tests.
+type stubExtractor struct{}
+
+func (stubExtractor) Extract(context.Context, string) (enricherconfig.ExtractResult, error) {
+	return enricherconfig.ExtractResult{}, nil
+}
+
+// --- Config method selection --------------------------------------------------
+
+// Config.Validate must require exactly one enrichment method: with none set it
+// errors, and with any one set it delegates to that method's validation.
+func TestConfigValidate_RequiresAConfiguredMethod(t *testing.T) {
+	t.Parallel()
+
+	var empty enricherconfig.Config
+	if err := empty.Validate(); err == nil {
+		t.Fatal("expected error when no enrichment method is configured, got nil")
+	}
+}
+
+func TestConfigValidate_DelegatesToConfiguredMethod(t *testing.T) {
+	t.Parallel()
+
+	llm := validLLM()
+
+	cases := []struct {
+		name string
+		cfg  enricherconfig.Config
+	}{
+		{"static", enricherconfig.Config{Static: &enricherconfig.StaticConfig{}}},
+		{"extractor", enricherconfig.Config{Extractor: &enricherconfig.ExtractorConfig{Extractor: stubExtractor{}}}},
+		{"llm", enricherconfig.Config{LLM: &llm}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := tc.cfg.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+		})
+	}
+}
+
+// --- LLM config ---------------------------------------------------------------
+
+// LLMConfig.Validate delegates the tool-host check to toolhost.Config.Validate();
+// a broken ToolHost must surface as a validation failure (no silent acceptance,
+// no panic deeper in toolhost.New).
+func TestLLMValidate_DelegatesToolHostValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -88,7 +144,7 @@ func TestValidate_DelegatesToolHostValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := enricherconfig.Config{
+			cfg := enricherconfig.LLMConfig{
 				ToolHost:          tt.toolHost,
 				RequestsPerMinute: 1,
 			}
@@ -116,13 +172,10 @@ func TestValidate_DelegatesToolHostValidation(t *testing.T) {
 // When no template path is set, the prompts resolve to the embedded defaults.
 // This is load-bearing: an empty prompt silently sends no instructions to the
 // LLM, which surfaces as cryptic downstream JSON-parse failures.
-func TestPrompts_DefaultWhenUnset(t *testing.T) {
+func TestLLMPrompts_DefaultWhenUnset(t *testing.T) {
 	t.Parallel()
 
-	cfg := enricherconfig.Config{
-		ToolHost:          validToolHost(),
-		RequestsPerMinute: 1,
-	}
+	cfg := validLLM()
 
 	skills, err := cfg.SkillsPrompt()
 	if err != nil {
@@ -145,7 +198,7 @@ func TestPrompts_DefaultWhenUnset(t *testing.T) {
 
 // When a custom template path is supplied, the prompts resolve to its contents.
 // Resolution must not mutate the input path fields.
-func TestPrompts_LoadCustomFromDisk(t *testing.T) {
+func TestLLMPrompts_LoadCustomFromDisk(t *testing.T) {
 	t.Parallel()
 
 	const skillsBody = "custom skills prompt body"
@@ -155,7 +208,7 @@ func TestPrompts_LoadCustomFromDisk(t *testing.T) {
 	skillsPath := writeFile(t, "skills.md", skillsBody)
 	domainsPath := writeFile(t, "domains.md", domainsBody)
 
-	cfg := enricherconfig.Config{
+	cfg := enricherconfig.LLMConfig{
 		ToolHost:              validToolHost(),
 		SkillsPromptTemplate:  skillsPath,
 		DomainsPromptTemplate: domainsPath,
@@ -185,24 +238,24 @@ func TestPrompts_LoadCustomFromDisk(t *testing.T) {
 	}
 }
 
-func TestValidate_RejectsMissingPromptTemplateFile(t *testing.T) {
+func TestLLMValidate_RejectsMissingPromptTemplateFile(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		mutate      func(*enricherconfig.Config)
+		mutate      func(*enricherconfig.LLMConfig)
 		wantErrText string
 	}{
 		{
 			name: "missing skills template file",
-			mutate: func(c *enricherconfig.Config) {
+			mutate: func(c *enricherconfig.LLMConfig) {
 				c.SkillsPromptTemplate = "/nonexistent/skills.md"
 			},
 			wantErrText: "skills prompt template file not found",
 		},
 		{
 			name: "missing domains template file",
-			mutate: func(c *enricherconfig.Config) {
+			mutate: func(c *enricherconfig.LLMConfig) {
 				c.DomainsPromptTemplate = "/nonexistent/domains.md"
 			},
 			wantErrText: "domains prompt template file not found",
@@ -213,10 +266,7 @@ func TestValidate_RejectsMissingPromptTemplateFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := enricherconfig.Config{
-				ToolHost:          validToolHost(),
-				RequestsPerMinute: 1,
-			}
+			cfg := validLLM()
 			tt.mutate(&cfg)
 
 			err := cfg.Validate()
@@ -231,17 +281,17 @@ func TestValidate_RejectsMissingPromptTemplateFile(t *testing.T) {
 // guard the LLM was sent a record with no instructions and replied in prose,
 // which then failed JSON parsing several layers downstream. This regression
 // test pins the explicit non-empty check at the end of Validate.
-func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
+func TestLLMValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		mutate      func(t *testing.T, c *enricherconfig.Config)
+		mutate      func(t *testing.T, c *enricherconfig.LLMConfig)
 		wantErrText string
 	}{
 		{
 			name: "skills template file contains only whitespace",
-			mutate: func(t *testing.T, c *enricherconfig.Config) {
+			mutate: func(t *testing.T, c *enricherconfig.LLMConfig) {
 				t.Helper()
 				c.SkillsPromptTemplate = writeFile(t, "skills.md", "   \n\t  ")
 			},
@@ -249,7 +299,7 @@ func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 		},
 		{
 			name: "domains template file contains only whitespace",
-			mutate: func(t *testing.T, c *enricherconfig.Config) {
+			mutate: func(t *testing.T, c *enricherconfig.LLMConfig) {
 				t.Helper()
 				c.DomainsPromptTemplate = writeFile(t, "domains.md", "\n\n")
 			},
@@ -261,10 +311,7 @@ func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := enricherconfig.Config{
-				ToolHost:          validToolHost(),
-				RequestsPerMinute: 1,
-			}
+			cfg := validLLM()
 			tt.mutate(t, &cfg)
 
 			err := cfg.Validate()
@@ -275,34 +322,75 @@ func TestValidate_RejectsEmptyPromptTemplateContents(t *testing.T) {
 	}
 }
 
-// SkipEnricher must bypass the tool-host / prompt-template / rate-limit
-// checks: those fields are unused on the static-enrichment path, and
-// requiring them would force callers to configure an LLM they never call.
-func TestValidate_SkipEnricher_BypassesLLMConfig(t *testing.T) {
+func TestLLMValidate_RequestsPerMinuteMustBePositive(t *testing.T) {
 	t.Parallel()
 
-	cfg := enricherconfig.Config{
-		SkipEnricher: true,
-		Skills:       []*typesv1.Skill{{Name: "skill-a", Id: 1}},
-		Domains:      []*typesv1.Domain{{Name: "domain-a", Id: 2}},
+	tests := []struct {
+		name              string
+		requestsPerMinute int
+		wantErr           bool
+	}{
+		{name: "zero is rejected", requestsPerMinute: 0, wantErr: true},
+		{name: "negative is rejected", requestsPerMinute: -5, wantErr: true},
+		{name: "positive is accepted", requestsPerMinute: 1, wantErr: false},
+		{name: "large positive is accepted", requestsPerMinute: 1000, wantErr: false},
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	if cfg.SkillsPromptTemplate != "" {
-		t.Errorf("prompt templates should not be populated on the skip path, got %q", cfg.SkillsPromptTemplate)
+			cfg := enricherconfig.LLMConfig{
+				ToolHost:          validToolHost(),
+				RequestsPerMinute: tt.requestsPerMinute,
+			}
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "requests per minute") {
+					t.Fatalf("expected requests-per-minute error, got %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
-// Empty Skills + Domains are valid on the skip path. The static enricher
-// will assign empty lists to every record; that's a deterministic and
-// well-defined outcome, not a misconfiguration.
-func TestValidate_SkipEnricher_AllowsEmptyLists(t *testing.T) {
+func TestLLMValidate_RequiresToolHost(t *testing.T) {
 	t.Parallel()
 
-	cfg := enricherconfig.Config{SkipEnricher: true}
+	cfg := enricherconfig.LLMConfig{RequestsPerMinute: 2}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("LLM config should fail validation without tool host config")
+	}
+}
+
+// --- Extractor config ---------------------------------------------------------
+
+func TestExtractorValidate_RequiresNonNilExtractor(t *testing.T) {
+	t.Parallel()
+
+	empty := enricherconfig.ExtractorConfig{}
+	if err := empty.Validate(); err == nil {
+		t.Fatal("expected error for nil extractor, got nil")
+	}
+
+	set := enricherconfig.ExtractorConfig{Extractor: stubExtractor{}}
+	if err := set.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// --- Static config ------------------------------------------------------------
+
+// Empty Skills + Domains are valid on the static path. The static enricher will
+// assign empty lists to every record; that's a deterministic and well-defined
+// outcome, not a misconfiguration.
+func TestStaticValidate_AllowsEmptyLists(t *testing.T) {
+	t.Parallel()
+
+	cfg := enricherconfig.StaticConfig{}
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -312,43 +400,39 @@ func TestValidate_SkipEnricher_AllowsEmptyLists(t *testing.T) {
 // An entry with neither Name nor Id would silently produce an empty struct
 // in the record, which downstream OASF consumers reject in confusing ways.
 // Validate must catch this at config time, including nil pointer entries.
-func TestValidate_SkipEnricher_RejectsEntriesWithoutIdentifier(t *testing.T) {
+func TestStaticValidate_RejectsEntriesWithoutIdentifier(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		cfg         enricherconfig.Config
+		cfg         enricherconfig.StaticConfig
 		wantErrText string
 	}{
 		{
 			name: "skill with empty name and zero id",
-			cfg: enricherconfig.Config{
-				SkipEnricher: true,
-				Skills:       []*typesv1.Skill{{Name: "ok", Id: 1}, {}},
+			cfg: enricherconfig.StaticConfig{
+				Skills: []*typesv1.Skill{{Name: "ok", Id: 1}, {}},
 			},
 			wantErrText: "skills[1]",
 		},
 		{
 			name: "domain with empty name and zero id",
-			cfg: enricherconfig.Config{
-				SkipEnricher: true,
-				Domains:      []*typesv1.Domain{{}, {Name: "ok"}},
+			cfg: enricherconfig.StaticConfig{
+				Domains: []*typesv1.Domain{{}, {Name: "ok"}},
 			},
 			wantErrText: "domains[0]",
 		},
 		{
 			name: "nil skill pointer is rejected",
-			cfg: enricherconfig.Config{
-				SkipEnricher: true,
-				Skills:       []*typesv1.Skill{nil},
+			cfg: enricherconfig.StaticConfig{
+				Skills: []*typesv1.Skill{nil},
 			},
 			wantErrText: "skills[0]: nil entry",
 		},
 		{
 			name: "nil domain pointer is rejected",
-			cfg: enricherconfig.Config{
-				SkipEnricher: true,
-				Domains:      []*typesv1.Domain{nil},
+			cfg: enricherconfig.StaticConfig{
+				Domains: []*typesv1.Domain{nil},
 			},
 			wantErrText: "domains[0]: nil entry",
 		},
@@ -368,11 +452,10 @@ func TestValidate_SkipEnricher_RejectsEntriesWithoutIdentifier(t *testing.T) {
 
 // Name-only or Id-only entries are valid: the CLI's --skill <name|id> flag
 // is documented to accept either, so the library must accept both.
-func TestValidate_SkipEnricher_AcceptsEntriesWithEitherIdentifier(t *testing.T) {
+func TestStaticValidate_AcceptsEntriesWithEitherIdentifier(t *testing.T) {
 	t.Parallel()
 
-	cfg := enricherconfig.Config{
-		SkipEnricher: true,
+	cfg := enricherconfig.StaticConfig{
 		Skills: []*typesv1.Skill{
 			{Name: "name-only"},
 			{Id: 42},
@@ -385,49 +468,5 @@ func TestValidate_SkipEnricher_AcceptsEntriesWithEitherIdentifier(t *testing.T) 
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
-	}
-}
-
-func TestValidate_RequestsPerMinuteMustBePositive(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name              string
-		requestsPerMinute int
-		wantErr           bool
-	}{
-		{name: "zero is rejected", requestsPerMinute: 0, wantErr: true},
-		{name: "negative is rejected", requestsPerMinute: -5, wantErr: true},
-		{name: "positive is accepted", requestsPerMinute: 1, wantErr: false},
-		{name: "large positive is accepted", requestsPerMinute: 1000, wantErr: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := enricherconfig.Config{
-				ToolHost:          validToolHost(),
-				RequestsPerMinute: tt.requestsPerMinute,
-			}
-
-			err := cfg.Validate()
-			if tt.wantErr {
-				if err == nil || !strings.Contains(err.Error(), "requests per minute") {
-					t.Fatalf("expected requests-per-minute error, got %v", err)
-				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidate_LLMMode_StillRequiresToolHost(t *testing.T) {
-	t.Parallel()
-
-	cfg := enricherconfig.Config{RequestsPerMinute: 2}
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("LLM mode should fail validation without tool host config")
 	}
 }

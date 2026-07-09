@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/agntcy/dir-importer/config"
-	"github.com/agntcy/dir-importer/enricher"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
@@ -1036,15 +1036,15 @@ func (r *stubNewStreamResult) ResCh() <-chan *searchv1.SearchCIDsResponse { retu
 func (r *stubNewStreamResult) ErrCh() <-chan error                        { return r.errCh }
 func (r *stubNewStreamResult) DoneCh() <-chan struct{}                    { return r.doneCh }
 
-// stubExtractor implements enricher.RecordExtractor for New() construction tests.
+// stubExtractor implements enricherconfig.RecordExtractor for New() construction tests.
 type stubExtractor struct{}
 
-func (stubExtractor) Extract(_ context.Context, _ string) (enricher.ExtractResult, error) {
-	return enricher.ExtractResult{}, nil
+func (stubExtractor) Extract(_ context.Context, _ string) (enricherconfig.ExtractResult, error) {
+	return enricherconfig.ExtractResult{}, nil
 }
 
-// TestNew_SelectsExtractorEnricher proves that when cfg.Extractor is set (and
-// SkipEnricher is false), New succeeds without any ToolHost/LLM config.
+// TestNew_SelectsExtractorEnricher proves that when an Extractor method is
+// configured, New succeeds without any ToolHost/LLM config.
 func TestNew_SelectsExtractorEnricher(t *testing.T) {
 	t.Parallel()
 
@@ -1058,9 +1058,11 @@ func TestNew_SelectsExtractorEnricher(t *testing.T) {
 	}
 
 	cfg := config.Config{
-		Type:      config.ImportTypeMCP,
-		FilePath:  mcpFile,
-		Extractor: stubExtractor{},
+		Type:     config.ImportTypeMCP,
+		FilePath: mcpFile,
+		Enricher: enricherconfig.Config{
+			Extractor: &enricherconfig.ExtractorConfig{Extractor: stubExtractor{}},
+		},
 	}
 
 	imp, err := New(context.Background(), stubNewClient{}, cfg)

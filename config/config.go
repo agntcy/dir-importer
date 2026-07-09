@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/agntcy/dir-importer/enricher"
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	corev1 "github.com/agntcy/dir/api/core/v1"
@@ -65,11 +64,6 @@ type Config struct {
 
 	Enricher enricherconfig.Config // Configuration for the enricher pipeline stage
 	Scanner  scannerconfig.Config  // Configuration for the scanner pipeline stage
-
-	// Extractor, when non-nil, selects deterministic Extractor-based enrichment
-	// instead of the LLM/MCP path (and takes precedence over it, but not over
-	// Enricher.SkipEnricher). The caller provisions and injects it.
-	Extractor enricher.RecordExtractor
 }
 
 // Validate checks if the configuration is valid.
@@ -91,14 +85,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported import type: %s", c.Type)
 	}
 
-	// Enricher-mode precedence mirrors importer.New: SkipEnricher (static), then
-	// an injected Extractor (deterministic), then the LLM/MCP path. Extractor mode
-	// needs no LLM/MCP configuration, so its validation is skipped; SkipEnricher
-	// still validates its taxonomy entries via Enricher.Validate.
-	if c.Extractor == nil || c.Enricher.SkipEnricher {
-		if err := c.Enricher.Validate(); err != nil {
-			return fmt.Errorf("enricher configuration is invalid: %w", err)
-		}
+	// Enricher.Validate selects and validates the configured method (Static,
+	// Extractor, or LLM) and errors when none is set.
+	if err := c.Enricher.Validate(); err != nil {
+		return fmt.Errorf("enricher configuration is invalid: %w", err)
 	}
 
 	if err := c.Scanner.Validate(); err != nil {
