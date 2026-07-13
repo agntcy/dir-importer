@@ -157,7 +157,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 }
 
 func translatorOptions(authors []string) []translator.TranslatorOption {
-	opts := []translator.TranslatorOption{translator.WithVersion("1.0.0")}
+	opts := []translator.TranslatorOption{translator.WithVersion("1.1.0")}
 	if len(authors) > 0 {
 		opts = append(opts, translator.WithAuthors(authors))
 	}
