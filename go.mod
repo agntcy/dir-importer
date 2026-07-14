@@ -1,6 +1,6 @@
 module github.com/agntcy/dir-importer
 
-go 1.26.3
+go 1.26.4
 
 require (
 	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.11-20260703134941-ebce38fee5a5.1
