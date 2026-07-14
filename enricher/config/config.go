@@ -4,6 +4,7 @@
 package config
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -23,24 +24,140 @@ var DefaultSkillsPromptTemplate string
 //go:embed enricher.domains.prompt.md
 var DefaultDomainsPromptTemplate string
 
-// Config contains configuration for the enricher pipeline stage.
+// Config selects the enrichment method for the pipeline stage. The three
+// methods are mutually exclusive and share equal standing; exactly one must be
+// set (enforced by Validate). importer.New selects in the order Static,
+// Extractor, LLM, and errors when none is configured.
 type Config struct {
+	Static    *StaticConfig    // Fixed skills/domains stamped on every record.
+	Extractor *ExtractorConfig // Deterministic, in-process taxonomy extractor.
+	LLM       *LLMConfig       // LLM agent over an MCP tool host.
+}
+
+// StaticConfig configures the static enricher: a fixed set of OASF taxonomy
+// entries assigned to every record.
+type StaticConfig struct {
+	Skills  []*typesv1.Skill  // OASF skill taxonomy entries assigned to every record.
+	Domains []*typesv1.Domain // OASF domain taxonomy entries assigned to every record.
+}
+
+// ExtractorConfig configures the extractor enricher. The caller provisions the
+// Extractor and injects it here.
+type ExtractorConfig struct {
+	Extractor RecordExtractor // Deterministic extractor; must be non-nil.
+}
+
+// LLMConfig configures the LLM enricher: an LLM agent talking to an MCP tool host.
+type LLMConfig struct {
 	ToolHost              toolhost.Config // Tool-host configuration (model, MCP servers, max-steps)
 	SkillsPromptTemplate  string          // Path to custom skills prompt template file (empty = embedded default)
 	DomainsPromptTemplate string          // Path to custom domains prompt template file (empty = embedded default)
 	RequestsPerMinute     int             // Maximum LLM API requests per minute (to avoid rate limit errors)
-
-	SkipEnricher bool              // SkipEnricher bypasses LLM-based enrichment entirely.
-	Skills       []*typesv1.Skill  // OASF skill taxonomy entries assigned to every record when SkipEnricher is true.
-	Domains      []*typesv1.Domain // OASF domain taxonomy entries assigned to every record when SkipEnricher is true.
 }
 
-// Validate checks if the configuration is valid.
+// RecordExtractor deterministically classifies record text into OASF skills and
+// domains, without an LLM. Implementations should scope extraction to the latest
+// OASF version (enrich-on-import semantics). It is satisfied by a caller-side
+// adapter over the oasf-sdk extractor and is trivially faked in tests. Keeping
+// this interface dir-importer-local keeps the oasf-sdk extractor package (and its
+// ML dependencies) out of dir-importer's build graph. It lives here (rather than
+// in the enricher package) so ExtractorConfig can hold it without an import cycle.
+type RecordExtractor interface {
+	// Extract classifies text into OASF skills and domains.
+	Extract(ctx context.Context, text string) (ExtractResult, error)
+}
+
+// ExtractResult holds the skills and domains a RecordExtractor recommends.
+type ExtractResult struct {
+	Skills  []TaxonomyClass
+	Domains []TaxonomyClass
+}
+
+// TaxonomyClass is a single OASF skill or domain identified by name and/or id.
+type TaxonomyClass struct {
+	ID   uint32 // OASF numeric id
+	Name string // hierarchical OASF name
+}
+
+// Validate checks that exactly one enrichment method is configured and that the
+// configured method is itself valid. Setting more than one method is rejected
+// (it would make selection ambiguous), and setting none is rejected too.
 func (c *Config) Validate() error {
-	if c.SkipEnricher {
-		return c.validateSkipEnricher()
+	switch c.methodsSet() {
+	case 0:
+		return errors.New("no enrichment method configured (set one of Static, Extractor, LLM)")
+	case 1:
+		// Exactly one set — validate it below.
+	default:
+		return errors.New("multiple enrichment methods configured (set only one of Static, Extractor, LLM)")
 	}
 
+	switch {
+	case c.Static != nil:
+		return c.Static.Validate()
+	case c.Extractor != nil:
+		return c.Extractor.Validate()
+	default:
+		return c.LLM.Validate()
+	}
+}
+
+// methodsSet counts how many enrichment methods are configured.
+func (c *Config) methodsSet() int {
+	n := 0
+
+	if c.Static != nil {
+		n++
+	}
+
+	if c.Extractor != nil {
+		n++
+	}
+
+	if c.LLM != nil {
+		n++
+	}
+
+	return n
+}
+
+// Validate enforces that every taxonomy entry carries at least one identifier
+// (name or id).
+func (c *StaticConfig) Validate() error {
+	for i, s := range c.Skills {
+		if s == nil {
+			return fmt.Errorf("skills[%d]: nil entry", i)
+		}
+
+		if s.GetName() == "" && s.GetId() == 0 {
+			return fmt.Errorf("skills[%d]: at least one of name or id must be set", i)
+		}
+	}
+
+	for i, d := range c.Domains {
+		if d == nil {
+			return fmt.Errorf("domains[%d]: nil entry", i)
+		}
+
+		if d.GetName() == "" && d.GetId() == 0 {
+			return fmt.Errorf("domains[%d]: at least one of name or id must be set", i)
+		}
+	}
+
+	return nil
+}
+
+// Validate ensures an extractor was injected.
+func (c *ExtractorConfig) Validate() error {
+	if c.Extractor == nil {
+		return errors.New("extractor must not be nil")
+	}
+
+	return nil
+}
+
+// Validate checks the LLM/MCP configuration.
+func (c *LLMConfig) Validate() error {
 	if err := c.ToolHost.Validate(); err != nil {
 		return fmt.Errorf("tool host: %w", err)
 	}
@@ -62,13 +179,13 @@ func (c *Config) Validate() error {
 
 // SkillsPrompt returns the skills prompt template content: the contents of the
 // SkillsPromptTemplate file, or the embedded default when no path is set.
-func (c *Config) SkillsPrompt() (string, error) {
+func (c *LLMConfig) SkillsPrompt() (string, error) {
 	return loadPromptTemplate("skills", c.SkillsPromptTemplate, DefaultSkillsPromptTemplate)
 }
 
 // DomainsPrompt returns the domains prompt template content: the contents of
 // the DomainsPromptTemplate file, or the embedded default when no path is set.
-func (c *Config) DomainsPrompt() (string, error) {
+func (c *LLMConfig) DomainsPrompt() (string, error) {
 	return loadPromptTemplate("domains", c.DomainsPromptTemplate, DefaultDomainsPromptTemplate)
 }
 
@@ -87,32 +204,6 @@ func validatePromptTemplate(label, path string) error {
 
 	if strings.TrimSpace(string(data)) == "" {
 		return fmt.Errorf("%s prompt template is empty", label)
-	}
-
-	return nil
-}
-
-// validateSkipEnricher enforces that every taxonomy entry carries at least
-// one identifier (name or id).
-func (c *Config) validateSkipEnricher() error {
-	for i, s := range c.Skills {
-		if s == nil {
-			return fmt.Errorf("skills[%d]: nil entry", i)
-		}
-
-		if s.GetName() == "" && s.GetId() == 0 {
-			return fmt.Errorf("skills[%d]: at least one of name or id must be set", i)
-		}
-	}
-
-	for i, d := range c.Domains {
-		if d == nil {
-			return fmt.Errorf("domains[%d]: nil entry", i)
-		}
-
-		if d.GetName() == "" && d.GetId() == 0 {
-			return fmt.Errorf("domains[%d]: at least one of name or id must be set", i)
-		}
 	}
 
 	return nil

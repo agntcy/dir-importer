@@ -145,7 +145,7 @@ func TestSetStructSkills_HappyPath(t *testing.T) {
 
 	s := &structpb.Struct{Fields: map[string]*structpb.Value{}}
 	skills := []*typesv1.Skill{
-		{Name: "skill-1", Id: 100},
+		{Name: testSkillName, Id: 100},
 		{Name: "skill-2", Id: 200},
 	}
 
@@ -163,7 +163,7 @@ func TestSetStructSkills_HappyPath(t *testing.T) {
 	}
 
 	first := got.GetValues()[0].GetStructValue().GetFields()
-	if first["name"].GetStringValue() != "skill-1" || first["id"].GetNumberValue() != 100 {
+	if first["name"].GetStringValue() != testSkillName || first["id"].GetNumberValue() != 100 {
 		t.Errorf("first = %+v", first)
 	}
 }

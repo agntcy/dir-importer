@@ -6,8 +6,9 @@ package enricher
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -20,13 +21,21 @@ type StaticEnricher struct {
 	domains *structpb.ListValue
 }
 
-// NewStaticEnricher returns a StaticEnricher that assigns the given OASF
-// skills and domains to every record.
-func NewStaticEnricher(skills []*typesv1.Skill, domains []*typesv1.Domain) *StaticEnricher {
-	return &StaticEnricher{
-		skills:  skillsToListValue(skills),
-		domains: domainsToListValue(domains),
+// NewStaticEnricher returns a StaticEnricher that assigns cfg's OASF skills and
+// domains to every record. It errors on a nil or invalid config.
+func NewStaticEnricher(cfg *enricherconfig.StaticConfig) (*StaticEnricher, error) {
+	if cfg == nil {
+		return nil, errors.New("static enricher: config must not be nil")
 	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("static enricher config: %w", err)
+	}
+
+	return &StaticEnricher{
+		skills:  skillsToListValue(cfg.Skills),
+		domains: domainsToListValue(cfg.Domains),
+	}, nil
 }
 
 // Enrich reads records from inputCh, injects the configured skills and domains, and forwards them.

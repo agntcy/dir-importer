@@ -16,6 +16,7 @@ import (
 	"github.com/agntcy/dir-importer/config"
 	"github.com/agntcy/dir-importer/dedup"
 	"github.com/agntcy/dir-importer/enricher"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/fetcher"
 	"github.com/agntcy/dir-importer/pusher"
 	"github.com/agntcy/dir-importer/scanner"
@@ -66,15 +67,9 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		return nil, fmt.Errorf("failed to create duplicate checker: %w", err)
 	}
 
-	var e types.Enricher
-
-	if cfg.Enricher.SkipEnricher {
-		e = enricher.NewStaticEnricher(cfg.Enricher.Skills, cfg.Enricher.Domains)
-	} else {
-		e, err = enricher.New(ctx, cfg.Enricher)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create enricher: %w", err)
-		}
+	e, err := newEnricher(ctx, cfg.Enricher)
+	if err != nil {
+		return nil, err
 	}
 
 	sc, err := scanner.New(cfg.Scanner)
@@ -92,6 +87,38 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		scanner:     sc,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),
 	}, nil
+}
+
+// newEnricher builds the enricher for the method configured in cfg, selecting by
+// precedence (Static, then Extractor, then LLM) and erroring when none is set.
+// Config.Validate rejects configs with more than one method set; callers that
+// skip validation and set several will get the first by this precedence.
+func newEnricher(ctx context.Context, cfg enricherconfig.Config) (types.Enricher, error) {
+	switch {
+	case cfg.Static != nil:
+		e, err := enricher.NewStaticEnricher(cfg.Static)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create static enricher: %w", err)
+		}
+
+		return e, nil
+	case cfg.Extractor != nil:
+		e, err := enricher.NewExtractorEnricher(cfg.Extractor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create extractor enricher: %w", err)
+		}
+
+		return e, nil
+	case cfg.LLM != nil:
+		e, err := enricher.NewLLMEnricher(ctx, cfg.LLM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create LLM enricher: %w", err)
+		}
+
+		return e, nil
+	default:
+		return nil, errors.New("failed to create enricher: no enrichment method configured")
+	}
 }
 
 //nolint:gocognit,cyclop // Full pipeline wiring and per-stage error collectors; splitting obscures flow.

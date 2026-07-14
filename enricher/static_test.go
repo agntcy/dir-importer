@@ -9,6 +9,7 @@ import (
 	"time"
 
 	typesv1 "buf.build/gen/go/agntcy/oasf/protocolbuffers/go/agntcy/oasf/types/v1"
+	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/types"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -20,23 +21,30 @@ import (
 // record to verify the enricher's pipeline mechanics (forwarding, context
 // cancellation, error handling). Concrete-value semantics are covered
 // separately in the TestNewStaticEnricher_* assignment tests.
-func newStaticEnricherFixture() *StaticEnricher {
-	return NewStaticEnricher(
-		[]*typesv1.Skill{{
+func newStaticEnricherFixture(t *testing.T) *StaticEnricher {
+	t.Helper()
+
+	se, err := NewStaticEnricher(&enricherconfig.StaticConfig{
+		Skills: []*typesv1.Skill{{
 			Name: "natural_language_processing/natural_language_understanding/contextual_comprehension",
 			Id:   10101, //nolint:mnd
 		}},
-		[]*typesv1.Domain{{
+		Domains: []*typesv1.Domain{{
 			Name: "technology/software_engineering",
 			Id:   102, //nolint:mnd
 		}},
-	)
+	})
+	if err != nil {
+		t.Fatalf("NewStaticEnricher: %v", err)
+	}
+
+	return se
 }
 
 func TestStaticEnricher_Enrich_HappyPath(t *testing.T) {
 	t.Parallel()
 
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("agent-1"),
@@ -81,7 +89,7 @@ func TestStaticEnricher_Enrich_HappyPath(t *testing.T) {
 func TestStaticEnricher_Enrich_PreservesExistingFields(t *testing.T) {
 	t.Parallel()
 
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("preserve-me"),
@@ -110,7 +118,7 @@ func TestStaticEnricher_Enrich_PreservesExistingFields(t *testing.T) {
 func TestStaticEnricher_Enrich_NilData_Errors(t *testing.T) {
 	t.Parallel()
 
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	in := make(chan *corev1.Record, 1)
 	in <- &corev1.Record{Data: nil}
@@ -139,7 +147,7 @@ func TestStaticEnricher_Enrich_NilFields_Errors(t *testing.T) {
 
 	// A non-nil Data with a nil Fields map should be rejected too — without
 	// a Fields map the static skills/domains have nowhere to land.
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	in := make(chan *corev1.Record, 1)
 	in <- &corev1.Record{Data: &structpb.Struct{Fields: nil}}
@@ -162,7 +170,7 @@ func TestStaticEnricher_Enrich_NilFields_Errors(t *testing.T) {
 func TestStaticEnricher_Enrich_MultipleRecords(t *testing.T) {
 	t.Parallel()
 
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	const n = 5
 
@@ -195,7 +203,7 @@ func TestStaticEnricher_Enrich_MultipleRecords(t *testing.T) {
 func TestStaticEnricher_Enrich_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	in := make(chan *corev1.Record)
 
@@ -232,7 +240,7 @@ func TestStaticEnricher_Enrich_StopsOnFirstError(t *testing.T) {
 
 	// Enrich closes its output after the first nil-data error so downstream
 	// stages get no further records from a degraded enricher.
-	se := newStaticEnricherFixture()
+	se := newStaticEnricherFixture(t)
 
 	in := make(chan *corev1.Record, 2)
 	in <- &corev1.Record{Data: nil} // bad first
@@ -256,15 +264,18 @@ func TestStaticEnricher_Enrich_StopsOnFirstError(t *testing.T) {
 func TestNewStaticEnricher_AssignsCallerSuppliedEntries(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher(
-		[]*typesv1.Skill{
+	se, err := NewStaticEnricher(&enricherconfig.StaticConfig{
+		Skills: []*typesv1.Skill{
 			{Name: "skill-a", Id: 1},
 			{Name: "skill-b", Id: 2},
 		},
-		[]*typesv1.Domain{
+		Domains: []*typesv1.Domain{
 			{Name: testDomainA, Id: 10},
 		},
-	)
+	})
+	if err != nil {
+		t.Fatalf("NewStaticEnricher: %v", err)
+	}
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("agent-1"),
@@ -306,7 +317,10 @@ func TestNewStaticEnricher_AssignsCallerSuppliedEntries(t *testing.T) {
 func TestNewStaticEnricher_NilInputs_ProduceEmptyLists(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher(nil, nil)
+	se, err := NewStaticEnricher(&enricherconfig.StaticConfig{})
+	if err != nil {
+		t.Fatalf("NewStaticEnricher: %v", err)
+	}
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{
 		fieldName: structpb.NewStringValue("agent-1"),
@@ -351,13 +365,15 @@ func TestNewStaticEnricher_NilInputs_ProduceEmptyLists(t *testing.T) {
 func TestNewStaticEnricher_OmitsEmptyNameAndZeroID(t *testing.T) {
 	t.Parallel()
 
-	se := NewStaticEnricher(
-		[]*typesv1.Skill{
+	se, err := NewStaticEnricher(&enricherconfig.StaticConfig{
+		Skills: []*typesv1.Skill{
 			{Name: "named-only"},
 			{Id: 99},
 		},
-		nil,
-	)
+	})
+	if err != nil {
+		t.Fatalf("NewStaticEnricher: %v", err)
+	}
 
 	rec := &corev1.Record{Data: &structpb.Struct{Fields: map[string]*structpb.Value{}}}
 

@@ -85,6 +85,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported import type: %s", c.Type)
 	}
 
+	// Enricher.Validate selects and validates the configured method (Static,
+	// Extractor, or LLM) and errors when none is set.
 	if err := c.Enricher.Validate(); err != nil {
 		return fmt.Errorf("enricher configuration is invalid: %w", err)
 	}
