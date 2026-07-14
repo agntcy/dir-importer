@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.11-20260703134941-ebce38fee5a5.1
 	github.com/agntcy/dir/api v1.5.0
 	github.com/agntcy/dir/client v1.5.0
-	github.com/agntcy/oasf-sdk/pkg v1.0.6-0.20260629100853-cc016581c7f5
+	github.com/agntcy/oasf-sdk/pkg v1.1.0
 	github.com/mark3labs/mcp-go v0.56.0
 	github.com/modelcontextprotocol/registry v1.7.9
 	github.com/sashabaranov/go-openai v1.41.2
