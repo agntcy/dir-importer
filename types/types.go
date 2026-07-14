@@ -18,14 +18,13 @@ type Importer interface {
 
 // ImportResult summarizes the outcome of an import operation.
 type ImportResult struct {
-	TotalRecords    int
-	ImportedCount   int
-	SkippedCount    int
-	FailedCount     int
-	Errors          []error
-	OutputDir       string
-	ImportedCIDs    []string
-	ScannerFindings []string
+	TotalRecords  int
+	ImportedCount int
+	SkippedCount  int
+	FailedCount   int
+	Errors        []error
+	OutputDir     string
+	ImportedCIDs  []string
 }
 
 // Fetcher is an interface for fetching records from an external source.
@@ -64,35 +63,15 @@ type DuplicateChecker interface {
 	FilterDuplicates(ctx context.Context, inputCh <-chan SourceItem, result *Result) <-chan SourceItem
 }
 
-// Scanner is a pipeline stage that runs security scans between transform and push.
-// It may drop records or append to result.ScannerFindings. Errors are sent to the returned errCh.
-type Scanner interface {
-	// Scan reads records from inputCh, runs the scanner per record, and sends records to the returned channel (may drop some).
-	Scan(ctx context.Context, inputCh <-chan *corev1.Record, result *Result) (<-chan *corev1.Record, <-chan error)
-}
-
 // Result contains the results of the pipeline execution.
 type Result struct {
-	TotalRecords    int
-	ImportedCount   int
-	SkippedCount    int
-	FailedCount     int
-	Errors          []error
-	ImportedCIDs    []string // CIDs of successfully imported records
-	ScannerFindings []string
-	Mu              sync.Mutex
-}
-
-// RecordScannerFinding appends a scanner finding message (e.g. "record-name: error: message").
-func (r *Result) RecordScannerFinding(msg string) {
-	if r == nil || msg == "" {
-		return
-	}
-
-	r.Mu.Lock()
-	defer r.Mu.Unlock()
-
-	r.ScannerFindings = append(r.ScannerFindings, msg)
+	TotalRecords  int
+	ImportedCount int
+	SkippedCount  int
+	FailedCount   int
+	Errors        []error
+	ImportedCIDs  []string // CIDs of successfully imported records
+	Mu            sync.Mutex
 }
 
 // IncrementFailedCount increments the failed record count (thread-safe).

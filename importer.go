@@ -19,7 +19,6 @@ import (
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
 	"github.com/agntcy/dir-importer/fetcher"
 	"github.com/agntcy/dir-importer/pusher"
-	"github.com/agntcy/dir-importer/scanner"
 	"github.com/agntcy/dir-importer/shared"
 	"github.com/agntcy/dir-importer/transformer"
 	"github.com/agntcy/dir-importer/types"
@@ -34,7 +33,6 @@ type Importer struct {
 	dedup       types.DuplicateChecker
 	transformer types.Transformer
 	enricher    types.Enricher
-	scanner     types.Scanner
 	pusher      types.Pusher
 }
 
@@ -72,11 +70,6 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		return nil, err
 	}
 
-	sc, err := scanner.New(cfg.Scanner)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create scanner: %w", err)
-	}
-
 	return &Importer{
 		cfg:         cfg,
 		client:      client,
@@ -84,7 +77,6 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		dedup:       d,
 		transformer: transformer.NewTransformer(cfg.Debug, cfg.Authors),
 		enricher:    e,
-		scanner:     sc,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),
 	}, nil
 }
@@ -142,24 +134,12 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 	// Stage 4: Enrich records
 	enrichedCh, enrichErrCh := i.enricher.Enrich(ctx, transformedCh, result)
 
-	// Stage 5: Scanner — may drop records, appends to result.ScannerFindings
-	var pushInputCh <-chan *corev1.Record
-
-	var scannerErrCh <-chan error
-
-	if i.cfg.Scanner.Enabled {
-		pushInputCh, scannerErrCh = i.scanner.Scan(ctx, enrichedCh, result)
-	} else {
-		pushInputCh = enrichedCh
-		scannerErrCh = scanner.ClosedScannerErrCh
-	}
-
-	// Stage 6: Push records
-	refCh, pushErrCh := i.pusher.Push(ctx, pushInputCh)
+	// Stage 5: Push records
+	refCh, pushErrCh := i.pusher.Push(ctx, enrichedCh)
 
 	// Collect errors from all stages
 	var wg sync.WaitGroup
-	wg.Add(6) //nolint:mnd // fetch, transform, enrich, scanner, push refs, push errors
+	wg.Add(5) //nolint:mnd // fetch, transform, enrich, push refs, push errors
 
 	// Collect fetch errors
 	go func() {
@@ -192,19 +172,6 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 		defer wg.Done()
 
 		for err := range enrichErrCh {
-			if err != nil {
-				result.Mu.Lock()
-				result.Errors = append(result.Errors, err)
-				result.Mu.Unlock()
-			}
-		}
-	}()
-
-	// Collect scanner errors
-	go func() {
-		defer wg.Done()
-
-		for err := range scannerErrCh {
 			if err != nil {
 				result.Mu.Lock()
 				result.Errors = append(result.Errors, err)
@@ -245,13 +212,12 @@ func (i *Importer) Run(ctx context.Context) *types.ImportResult {
 	wg.Wait()
 
 	return &types.ImportResult{
-		TotalRecords:    result.TotalRecords,
-		ImportedCount:   result.ImportedCount,
-		SkippedCount:    result.SkippedCount,
-		FailedCount:     result.FailedCount,
-		Errors:          result.Errors,
-		ImportedCIDs:    result.ImportedCIDs,
-		ScannerFindings: result.ScannerFindings,
+		TotalRecords:  result.TotalRecords,
+		ImportedCount: result.ImportedCount,
+		SkippedCount:  result.SkippedCount,
+		FailedCount:   result.FailedCount,
+		Errors:        result.Errors,
+		ImportedCIDs:  result.ImportedCIDs,
 	}
 }
 
@@ -280,21 +246,9 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 	// Stage 4: Enrich records
 	enrichedCh, enrichErrCh := i.enricher.Enrich(ctx, transformedCh, result)
 
-	// Stage 5: Scanner — may drop records, writes to stdout (same gating as Run).
-	var fileInputCh <-chan *corev1.Record
-
-	var scannerErrCh <-chan error
-
-	if i.cfg.Scanner.Enabled {
-		fileInputCh, scannerErrCh = i.scanner.Scan(ctx, enrichedCh, result)
-	} else {
-		fileInputCh = enrichedCh
-		scannerErrCh = scanner.ClosedScannerErrCh
-	}
-
 	// Collect errors from all stages
 	var wg sync.WaitGroup
-	wg.Add(5) //nolint:mnd // fetch, transform, enrich, scanner errors, file writer
+	wg.Add(4) //nolint:mnd // fetch, transform, enrich, file writer
 
 	// Collect fetch errors
 	go func() {
@@ -335,29 +289,16 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 		}
 	}()
 
-	// Collect scanner errors
-	go func() {
-		defer wg.Done()
-
-		for err := range scannerErrCh {
-			if err != nil {
-				result.Mu.Lock()
-				result.Errors = append(result.Errors, err)
-				result.Mu.Unlock()
-			}
-		}
-	}()
-
 	// Collect records - write to directory, one file per record
 	go func() {
 		defer wg.Done()
 
 		defer func() {
-			for range fileInputCh {
+			for range enrichedCh {
 			}
 		}()
 
-		if err := writeRecords(outputDir, fileInputCh); err != nil {
+		if err := writeRecords(outputDir, enrichedCh); err != nil {
 			result.Mu.Lock()
 			result.Errors = append(result.Errors, fmt.Errorf("failed to write records: %w", err))
 			result.Mu.Unlock()
@@ -367,14 +308,13 @@ func (i *Importer) DryRun(ctx context.Context) *types.ImportResult {
 	wg.Wait()
 
 	return &types.ImportResult{
-		TotalRecords:    result.TotalRecords,
-		ImportedCount:   result.ImportedCount,
-		SkippedCount:    result.SkippedCount,
-		FailedCount:     result.FailedCount,
-		Errors:          result.Errors,
-		OutputDir:       outputDir,
-		ImportedCIDs:    result.ImportedCIDs,
-		ScannerFindings: result.ScannerFindings,
+		TotalRecords:  result.TotalRecords,
+		ImportedCount: result.ImportedCount,
+		SkippedCount:  result.SkippedCount,
+		FailedCount:   result.FailedCount,
+		Errors:        result.Errors,
+		OutputDir:     outputDir,
+		ImportedCIDs:  result.ImportedCIDs,
 	}
 }
 

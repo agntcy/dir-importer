@@ -7,8 +7,6 @@ vars:
   BIN_DIR: "{{ .ROOT_DIR }}/.bin"
   GOLANGCI_LINT_VERSION: "2.12.1"
   GOLANGCI_LINT_BIN: "{{ .BIN_DIR }}/golangci-lint-{{ .GOLANGCI_LINT_VERSION }}"
-  UV_VERSION: "0.10.11"
-  UV_BIN: "{{ .BIN_DIR }}/uv-{{ .UV_VERSION }}"
 
 tasks:
   default:
@@ -69,20 +67,6 @@ tasks:
     status:
       - test -d {{ .BIN_DIR }}
 
-  deps:uv:
-    desc: Install uv
-    deps:
-      - deps:bin-dir
-    env:
-      UV_INSTALL_DIR: "{{ .BIN_DIR }}"
-    cmds:
-      - curl -sfL https://astral.sh/uv/{{ .UV_VERSION }}/install.sh | sh
-      - mv {{ .BIN_DIR }}/uv {{ .UV_BIN }}
-      - chmod +x {{ .UV_BIN }}
-      - rm -f {{ .BIN_DIR }}/uvx
-    status:
-      - test -x {{ .UV_BIN }}
-
   deps:golangci-lint:
     desc: Install golangci-lint
     internal: true
@@ -94,14 +78,6 @@ tasks:
       - chmod +x {{ .GOLANGCI_LINT_BIN }}
     status:
       - test -x {{ .GOLANGCI_LINT_BIN }}
-
-  deps:mcp-scanner:
-    desc: Install mcp-scanner CLI via uv
-    deps:
-      - deps:uv
-    cmds:
-      - echo "Installing mcp-scanner"
-      - "{{ .UV_BIN }} tool install --python 3.13 cisco-ai-mcp-scanner"
 
   clean:
     desc: Clean build artifacts

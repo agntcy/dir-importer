@@ -9,7 +9,6 @@ import (
 	"fmt"
 
 	enricherconfig "github.com/agntcy/dir-importer/enricher/config"
-	scannerconfig "github.com/agntcy/dir-importer/scanner/config"
 	corev1 "github.com/agntcy/dir/api/core/v1"
 	searchv1 "github.com/agntcy/dir/api/search/v1"
 	"github.com/agntcy/dir/client/streaming"
@@ -63,7 +62,6 @@ type Config struct {
 	Authors []string
 
 	Enricher enricherconfig.Config // Configuration for the enricher pipeline stage
-	Scanner  scannerconfig.Config  // Configuration for the scanner pipeline stage
 }
 
 // Validate checks if the configuration is valid.
@@ -89,10 +87,6 @@ func (c *Config) Validate() error {
 	// Extractor, or LLM) and errors when none is set.
 	if err := c.Enricher.Validate(); err != nil {
 		return fmt.Errorf("enricher configuration is invalid: %w", err)
-	}
-
-	if err := c.Scanner.Validate(); err != nil {
-		return fmt.Errorf("scanner configuration is invalid: %w", err)
 	}
 
 	return nil
