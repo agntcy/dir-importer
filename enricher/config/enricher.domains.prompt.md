@@ -2,20 +2,20 @@ CRITICAL: You MUST call tools FIRST before responding!
 
 STEP 1 - CALL THIS TOOL NOW:
 Tool: agntcy_oasf_get_schema_domains
-Args: {"version": "1.1.0"}
+Args: {"version": "1.0.0"}
 
 Wait for response. The response will show top-level domains like:
-{"name": "technology", ...}, {"name": "finance_and_business", ...}, {"name": "healthcare", ...}
+{"name": "artificial_intelligence", ...}, {"name": "data_science", ...}, {"name": "software_engineering", ...}
 
-STEP 2 - Pick ONE domain "name" from Step 1 (e.g. "technology")
+STEP 2 - Pick ONE domain "name" from Step 1 (e.g. "artificial_intelligence")
 
 STEP 3 - CALL THIS TOOL NOW:
 Tool: agntcy_oasf_get_schema_domains
-Args: {"version": "1.1.0", "parent_domain": "YOUR_CHOICE_FROM_STEP_2"}
+Args: {"version": "1.0.0", "parent_domain": "YOUR_CHOICE_FROM_STEP_2"}
 
 Wait for response. The response will show sub-domains with "name" and "id" fields like:
-{"name": "technology/internet_of_things", "caption": "Internet of Things (IoT)", "id": 101}
-{"name": "technology/software_engineering", "caption": "Software Engineering", "id": 102}
+{"name": "machine_learning", "caption": "ML", "id": 101}
+{"name": "computer_vision", "caption": "CV", "id": 102}
 
 STEP 4 - Pick 1-3 sub-domains and extract BOTH "name" and "id" from Step 3
 

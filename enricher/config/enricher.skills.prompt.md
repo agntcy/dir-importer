@@ -2,34 +2,36 @@ CRITICAL: You MUST call tools FIRST before responding!
 
 STEP 1 - CALL THIS TOOL NOW:
 Tool: agntcy_oasf_get_schema_skills
-Args: {"version": "1.1.0"}
+Args: {"version": "1.0.0"}
 
 Wait for response. The response will show top-level skills like:
-{"name": "language_processing", ...}, {"name": "software_engineering", ...}, {"name": "ai_ml_engineering", ...}
+{"name": "analytical_skills", ...}, {"name": "retrieval_augmented_generation", ...}, {"name": "natural_language_processing", ...}
 
-STEP 2 - Pick ONE skill "name" from Step 1 (e.g. "software_engineering")
+STEP 2 - Pick ONE skill "name" from Step 1 (e.g. "retrieval_augmented_generation")
 
 STEP 3 - CALL THIS TOOL NOW:
 Tool: agntcy_oasf_get_schema_skills
-Args: {"version": "1.1.0", "parent_skill": "YOUR_CHOICE_FROM_STEP_2"}
+Args: {"version": "1.0.0", "parent_skill": "YOUR_CHOICE_FROM_STEP_2"}
 
 Wait for response. The response will show sub-skills with "name" and "id" fields like:
-{"name": "software_engineering/code_generation", "caption": "Code Generation", "id": 601}
-{"name": "software_engineering/web_development", "caption": "Web Development", "id": 602}
+{"name": "retrieval_of_information", "caption": "Indexing", "id": 601}
+{"name": "document_or_database_question_answering", "caption": "Q&A", "id": 602}
 
 STEP 4 - Pick 1-5 sub-skills and extract BOTH "name" and "id" from Step 3
 
 DO NOT INVENT NAMES! These DO NOT exist:
 ❌ "information_retrieval_synthesis"
-❌ "api_server_operations"
-❌ "magic_code_writing"
-❌ "universal_problem_solving"
+❌ "api_server_operations"  
+❌ "statistical_analysis"
+❌ "data_visualization"
+❌ "code_generation"
+❌ "data_retrieval"
 
 Real examples (from actual schema):
-✓ "software_engineering/code_generation" with id 601
-✓ "software_engineering/web_development" with id 602
-✓ "language_processing/language_understanding" with its corresponding id 101
-✓ "language_processing/language_generation" with its corresponding id 103
+✓ "retrieval_augmented_generation/retrieval_of_information" with id 601
+✓ "retrieval_augmented_generation/document_or_database_question_answering" with id 602
+✓ "natural_language_processing/ethical_interaction" with its corresponding id 108
+✓ "analytical_skills/mathematical_reasoning" with its corresponding id 501
 
 STEP 5 - OUTPUT FORMAT (CRITICAL):
 Return ONLY the raw JSON object below. DO NOT wrap in markdown code blocks.

@@ -61,6 +61,10 @@ type Config struct {
 	// When empty, translators derive authors from the source (e.g. SKILL.md metadata).
 	Authors []string
 
+	// SchemaVersion sets the OASF schema version written into every translated record.
+	// When empty, transformer.DefaultSchemaVersion is used.
+	SchemaVersion string
+
 	Enricher enricherconfig.Config // Configuration for the enricher pipeline stage
 }
 

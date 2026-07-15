@@ -17,18 +17,28 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// DefaultSchemaVersion is the OASF schema version used when Config.SchemaVersion is empty.
+const DefaultSchemaVersion = "1.0.0"
+
 // Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
 type Transformer struct {
-	debug   bool
-	authors []string
+	debug         bool
+	authors       []string
+	schemaVersion string
 }
 
 // NewTransformer creates a transformer for MCP, A2A, and Agent Skill pipeline items.
 // authors, when non-empty, overrides OASF record authors via translator.WithAuthors.
-func NewTransformer(debug bool, authors []string) *Transformer {
+// schemaVersion sets the OASF schema version; when empty, DefaultSchemaVersion is used.
+func NewTransformer(debug bool, authors []string, schemaVersion string) *Transformer {
+	if schemaVersion == "" {
+		schemaVersion = DefaultSchemaVersion
+	}
+
 	return &Transformer{
-		debug:   debug,
-		authors: append([]string{}, authors...),
+		debug:         debug,
+		authors:       append([]string{}, authors...),
+		schemaVersion: schemaVersion,
 	}
 }
 
@@ -98,7 +108,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 			return nil, fmt.Errorf("A2A source item missing AgentCard struct")
 		}
 
-		record, err := convertA2AToOASF(item.A2A, t.authors)
+		record, err := t.convertA2AToOASF(item.A2A)
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
@@ -121,7 +131,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 			return nil, fmt.Errorf("agent skill source item missing skill struct")
 		}
 
-		record, err := convertAgentSkillToOASF(item.Skill, t.authors)
+		record, err := t.convertAgentSkillToOASF(item.Skill)
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
@@ -136,7 +146,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		return record, nil
 
 	case types.SourceKindMCP:
-		record, err := convertMCPToOASF(item.MCP, t.authors)
+		record, err := t.convertMCPToOASF(item.MCP)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert server %s:%s to OASF: %w",
 				item.MCP.Server.Name, item.MCP.Server.Version, err)
@@ -156,18 +166,18 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 	}
 }
 
-func translatorOptions(authors []string) []translator.TranslatorOption {
-	opts := []translator.TranslatorOption{translator.WithVersion("1.1.0")}
-	if len(authors) > 0 {
-		opts = append(opts, translator.WithAuthors(authors))
+func (t *Transformer) translatorOptions() []translator.TranslatorOption {
+	opts := []translator.TranslatorOption{translator.WithVersion(t.schemaVersion)}
+	if len(t.authors) > 0 {
+		opts = append(opts, translator.WithAuthors(t.authors))
 	}
 
 	return opts
 }
 
 // convertAgentSkillToOASF converts a parsed Agent Skill payload to an OASF record.
-func convertAgentSkillToOASF(skill *structpb.Struct, authors []string) (*corev1.Record, error) {
-	opts := translatorOptions(authors)
+func (t *Transformer) convertAgentSkillToOASF(skill *structpb.Struct) (*corev1.Record, error) {
+	opts := t.translatorOptions()
 
 	var (
 		data *structpb.Struct
@@ -202,8 +212,8 @@ func hasSkillArchive(skill *structpb.Struct) bool {
 	return strings.TrimSpace(v.GetStringValue()) != ""
 }
 
-func convertA2AToOASF(card *structpb.Struct, authors []string) (*corev1.Record, error) {
-	recordStruct, err := translator.A2AToRecord(card, translatorOptions(authors)...)
+func (t *Transformer) convertA2AToOASF(card *structpb.Struct) (*corev1.Record, error) {
+	recordStruct, err := translator.A2AToRecord(card, t.translatorOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("A2AToRecord: %w", err)
 	}
@@ -214,7 +224,7 @@ func convertA2AToOASF(card *structpb.Struct, authors []string) (*corev1.Record, 
 }
 
 // convertMCPToOASF converts an MCP server response to OASF format.
-func convertMCPToOASF(response mcpapiv0.ServerResponse, authors []string) (*corev1.Record, error) {
+func (t *Transformer) convertMCPToOASF(response mcpapiv0.ServerResponse) (*corev1.Record, error) {
 	server := response.Server
 
 	// Convert the MCP ServerJSON to a structpb.Struct
@@ -240,7 +250,7 @@ func convertMCPToOASF(response mcpapiv0.ServerResponse, authors []string) (*core
 	}
 
 	// Translate MCP struct to OASF record struct
-	recordStruct, err := translator.MCPToRecord(mcpData, translatorOptions(authors)...)
+	recordStruct, err := translator.MCPToRecord(mcpData, t.translatorOptions()...)
 	if err != nil {
 		// Print MCP source on translation failure
 		if mcpBytes, jsonErr := json.MarshalIndent(server, "", "  "); jsonErr == nil {
