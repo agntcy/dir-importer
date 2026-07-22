@@ -18,7 +18,7 @@ import (
 )
 
 // DefaultSchemaVersion is the OASF schema version used when Config.SchemaVersion is empty.
-const DefaultSchemaVersion = "1.0.0"
+const DefaultSchemaVersion = "1.1.0"
 
 // Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
 type Transformer struct {
