@@ -62,7 +62,13 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		return nil, fmt.Errorf("failed to create fetcher: %w", err)
 	}
 
-	d, err := dedup.NewDuplicateChecker(ctx, client, cfg.Type, cfg.Debug)
+	// Built before the duplicate checker so dedup can transform each fetched
+	// item to its pre-enrichment OASF representation for content hashing,
+	// using the same config (authors, schema version) as the real transform
+	// stage.
+	tr := transformer.NewTransformer(cfg.Debug, cfg.Authors, cfg.SchemaVersion)
+
+	d, err := dedup.NewDuplicateChecker(ctx, client, cfg.Type, cfg.Debug, tr.TransformRecord)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create duplicate checker: %w", err)
 	}
@@ -77,7 +83,7 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		client:      client,
 		fetcher:     fetch,
 		dedup:       d,
-		transformer: transformer.NewTransformer(cfg.Debug, cfg.Authors, cfg.SchemaVersion),
+		transformer: tr,
 		enricher:    e,
 		pusher:      pusher.NewClientPusher(client, cfg.Debug, cfg.SignFunc),
 	}, nil
