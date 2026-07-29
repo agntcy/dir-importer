@@ -4,8 +4,8 @@ go 1.26.5
 
 require (
 	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.11-20260721113505-cf7db8888586.1
-	github.com/agntcy/dir/api v1.6.0
-	github.com/agntcy/dir/client v1.6.0
+	github.com/agntcy/dir/api v1.6.2
+	github.com/agntcy/dir/client v1.6.2
 	github.com/agntcy/oasf-sdk/pkg v1.1.0
 	github.com/mark3labs/mcp-go v0.57.0
 	github.com/modelcontextprotocol/registry v1.8.0
