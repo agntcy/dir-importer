@@ -22,7 +22,7 @@ jobs:
           private-key: ${{ secrets.PROJECT_APP_KEY }}
 
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: ${{ github.head_ref }}
@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Self-hosted Renovate
-        uses: renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565 # v46.1.18
+        uses: renovatebot/github-action@3064367f740a1a91cca218698a63902689cce200 # v46.1.20
         with:
           token: ${{ steps.app-token.outputs.token }}
         env:
