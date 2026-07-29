@@ -44,8 +44,8 @@ github.com/mark3labs/mcp-go v0.56.0 h1:7aCj2wODCskMi08f923ADG+EfELZBdiKILny415cI
 github.com/mark3labs/mcp-go v0.56.0/go.mod h1:+8WclSK1ZUweCP3hvktSji8n8ABG/95QaEkeVE/Uwas=
 github.com/minio/sha256-simd v1.0.1 h1:6kaan5IFmwTNynnKKpDHe6FWHohJOHhCPchzK49dzMM=
 github.com/minio/sha256-simd v1.0.1/go.mod h1:Pz6AKMiUdngCLpeTL/RJY1M9rUuPMYujV5xJjtbRSN8=
-github.com/modelcontextprotocol/registry v1.7.9 h1:vpPfx2A2egjhm6YlbwfkX8NkR2N0S2eYmvYXI8bXaBs=
-github.com/modelcontextprotocol/registry v1.7.9/go.mod h1:y03zY98e+REsiCaj1sUKzXbk3qEp++Y3gzAnV83wrNs=
+github.com/modelcontextprotocol/registry v1.8.0 h1:x/seX0ji4iqRUpSovmkBcGbxfRiZZ7dgPwBcpCJrSTM=
+github.com/modelcontextprotocol/registry v1.8.0/go.mod h1:G6AUpTpZSekQvcLl5griUjijEE8vedARE/TyCaHEFdo=
 github.com/mr-tron/base58 v1.3.0 h1:K6Y13R2h+dku0wOqKtecgRnBUBPrZzLZy5aIj8lCcJI=
 github.com/mr-tron/base58 v1.3.0/go.mod h1:2BuubE67DCSWwVfx37JWNG8emOC0sHEU4/HpcYgCLX8=
 github.com/multiformats/go-base32 v0.1.0 h1:pVx9xoSPqEIQG8o+UbAe7DNi51oej1NtK+aGkbLYxPE=
