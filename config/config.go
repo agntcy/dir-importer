@@ -30,6 +30,11 @@ const (
 	// Markdown-only skills (only SKILL.md) are imported as application/agent-skills+md;
 	// skills with additional files are imported as application/agent-skills+gzip.
 	ImportTypeAgentSkill ImportType = "agent-skill"
+	// ImportTypeOASF imports record(s) already in OASF format from a local JSON file
+	// (one object or an array). This is the counterpart to --dry-run: the
+	// <cid>.record.json files it writes can be reviewed, edited, and re-imported
+	// unchanged via this import type instead of switching to the separate push command.
+	ImportTypeOASF ImportType = "oasf"
 )
 
 // ClientInterface defines the interface for the DIR client used by importers.
@@ -79,9 +84,9 @@ func (c *Config) Validate() error {
 		if c.RegistryURL == "" {
 			return errors.New("registry URL is required when import type is mcp-registry")
 		}
-	case ImportTypeMCP, ImportTypeA2A, ImportTypeAgentSkill:
+	case ImportTypeMCP, ImportTypeA2A, ImportTypeAgentSkill, ImportTypeOASF:
 		if c.FilePath == "" {
-			return errors.New("file path is required when import type is mcp, a2a, or agent-skill")
+			return errors.New("file path is required when import type is mcp, a2a, agent-skill, or oasf")
 		}
 	default:
 		return fmt.Errorf("unsupported import type: %s", c.Type)

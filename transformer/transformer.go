@@ -20,14 +20,18 @@ import (
 // DefaultSchemaVersion is the OASF schema version used when Config.SchemaVersion is empty.
 const DefaultSchemaVersion = "1.1.0"
 
-// Transformer implements the pipeline.Transformer interface for MCP, A2A, and Agent Skill sources.
+// unknownNameVersion is used in error messages when SourceItem.NameVersion
+// cannot derive a "name@version" for a source that failed conversion.
+const unknownNameVersion = "(unknown)"
+
+// Transformer implements the pipeline.Transformer interface for MCP, A2A, Agent Skill, and OASF sources.
 type Transformer struct {
 	debug         bool
 	authors       []string
 	schemaVersion string
 }
 
-// NewTransformer creates a transformer for MCP, A2A, and Agent Skill pipeline items.
+// NewTransformer creates a transformer for MCP, A2A, Agent Skill, and OASF pipeline items.
 // authors, when non-empty, overrides OASF record authors via translator.WithAuthors.
 // schemaVersion sets the OASF schema version; when empty, DefaultSchemaVersion is used.
 func NewTransformer(debug bool, authors []string, schemaVersion string) *Transformer {
@@ -98,7 +102,8 @@ func (t *Transformer) Transform(ctx context.Context, inputCh <-chan types.Source
 	return outputCh, errCh
 }
 
-// TransformRecord converts a pipeline source item (MCP, A2A, or Agent Skill) to OASF format.
+// TransformRecord converts a pipeline source item (MCP, A2A, or Agent Skill) to OASF format,
+// or validates a source item already in OASF format (passthrough).
 //
 //nolint:gocognit,cyclop // switch per source kind; complexity acceptable
 func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, error) {
@@ -112,7 +117,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
-				nv = "(unknown)"
+				nv = unknownNameVersion
 			}
 
 			return nil, fmt.Errorf("failed to convert A2A card %s to OASF: %w", nv, err)
@@ -135,7 +140,7 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 		if err != nil {
 			nv := item.NameVersion()
 			if nv == "" {
-				nv = "(unknown)"
+				nv = unknownNameVersion
 			}
 
 			return nil, fmt.Errorf("failed to convert agent skill %s to OASF: %w", nv, err)
@@ -157,6 +162,27 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 			if mcpBytes, err := json.Marshal(item.MCP.Server); err == nil {
 				record.Data.Fields["__mcp_debug_source"] = structpb.NewStringValue(string(mcpBytes))
 			}
+		}
+
+		return record, nil
+
+	case types.SourceKindOASF:
+		if item.OASF == nil {
+			return nil, fmt.Errorf("OASF source item missing record struct")
+		}
+
+		// Passthrough/validator: the input is already in target schema, so there is
+		// nothing to convert. Decode confirms the record is well-formed OASF before
+		// it is allowed further into the pipeline (dedup, enrich, scan, push).
+		record := &corev1.Record{Data: item.OASF}
+
+		if _, err := record.Decode(); err != nil {
+			nv := item.NameVersion()
+			if nv == "" {
+				nv = unknownNameVersion
+			}
+
+			return nil, fmt.Errorf("invalid OASF record %s: %w", nv, err)
 		}
 
 		return record, nil

@@ -32,6 +32,11 @@ const (
 
 // modulesByImportType maps each import type to the module names that should be
 // queried when building the deduplication cache.
+//
+// config.ImportTypeOASF has no entry here by design: a record already in OASF
+// format may carry any module (MCP, A2A, Agent Skill, or none), so buildCache's
+// "unknown import type" fallback — query every known module — is the correct
+// behavior for it, not an oversight.
 var modulesByImportType = map[config.ImportType][]string{
 	config.ImportTypeMCPRegistry: {moduleMCPCurrent, moduleMCPLegacy},
 	config.ImportTypeMCP:         {moduleMCPCurrent, moduleMCPLegacy},

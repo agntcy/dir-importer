@@ -21,6 +21,8 @@ const (
 	SourceKindA2A
 	// SourceKindAgentSkill is a parsed Agent Skill as [structpb.Struct] (see importer/skill package contract).
 	SourceKindAgentSkill
+	// SourceKindOASF is a record already in OASF format as [structpb.Struct] (e.g. --dry-run output re-imported).
+	SourceKindOASF
 )
 
 // SourceItem is one record from fetch through dedup before OASF transformation.
@@ -30,6 +32,7 @@ type SourceItem struct {
 	MCP   mcpapiv0.ServerResponse
 	A2A   *structpb.Struct
 	Skill *structpb.Struct
+	OASF  *structpb.Struct
 }
 
 // MCPSourceItem wraps an MCP server response for the pipeline.
@@ -47,6 +50,15 @@ func AgentSkillSourceItem(skill *structpb.Struct) SourceItem {
 	return SourceItem{Kind: SourceKindAgentSkill, Skill: skill}
 }
 
+// OASFSourceItem wraps a record already in OASF format as structpb.Struct for the pipeline.
+func OASFSourceItem(record *structpb.Struct) SourceItem {
+	return SourceItem{Kind: SourceKindOASF, OASF: record}
+}
+
+// defaultVersion is used for NameVersion when a source item has a name but no
+// version (e.g. an AgentCard, Agent Skill, or OASF record that omits it).
+const defaultVersion = "v1.0.0"
+
 // NameVersion returns "name@version" for deduplication, or "" if it cannot be derived.
 func (s SourceItem) NameVersion() string {
 	switch s.Kind {
@@ -55,42 +67,33 @@ func (s SourceItem) NameVersion() string {
 			return fmt.Sprintf("%s@%s", s.MCP.Server.Name, s.MCP.Server.Version)
 		}
 	case SourceKindA2A:
-		if s.A2A == nil {
-			return ""
-		}
-
-		name, version := a2aNameVersionFields(s.A2A)
-		if name == "" {
-			return ""
-		}
-
-		if version == "" {
-			version = "v1.0.0"
-		}
-
-		return fmt.Sprintf("%s@%s", name, version)
-
+		return nameVersion(topLevelNameVersionFields(s.A2A))
 	case SourceKindAgentSkill:
-		if s.Skill == nil {
-			return ""
-		}
-
-		name, version := agentSkillNameVersionFields(s.Skill)
-		if name == "" {
-			return ""
-		}
-
-		if version == "" {
-			version = "v1.0.0"
-		}
-
-		return fmt.Sprintf("%s@%s", name, version)
+		return nameVersion(agentSkillNameVersionFields(s.Skill))
+	case SourceKindOASF:
+		return nameVersion(topLevelNameVersionFields(s.OASF))
 	}
 
 	return ""
 }
 
-func a2aNameVersionFields(card *structpb.Struct) (string, string) {
+// nameVersion formats name/version as "name@version", defaulting an empty
+// version to defaultVersion. Returns "" if name is empty.
+func nameVersion(name, version string) string {
+	if name == "" {
+		return ""
+	}
+
+	if version == "" {
+		version = defaultVersion
+	}
+
+	return fmt.Sprintf("%s@%s", name, version)
+}
+
+// topLevelNameVersionFields extracts the top-level "name"/"version" string
+// fields shared by A2A AgentCard and OASF record payloads.
+func topLevelNameVersionFields(card *structpb.Struct) (string, string) {
 	if card == nil {
 		return "", ""
 	}

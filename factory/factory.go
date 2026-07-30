@@ -18,6 +18,7 @@ func init() {
 	Register(config.ImportTypeMCP, importer.New)
 	Register(config.ImportTypeA2A, importer.New)
 	Register(config.ImportTypeAgentSkill, importer.New)
+	Register(config.ImportTypeOASF, importer.New)
 }
 
 // ImporterFunc is a function that creates an Importer instance.

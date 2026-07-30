@@ -89,6 +89,14 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			wantErrText: errFilePathRequired,
 		},
 		{
+			name: "oasf file import without FilePath is rejected",
+			cfg: importerconfig.Config{
+				Type:     importerconfig.ImportTypeOASF,
+				Enricher: staticEnricher(),
+			},
+			wantErrText: errFilePathRequired,
+		},
+		{
 			name: "mcp file import with FilePath is accepted",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeMCP,
@@ -108,6 +116,14 @@ func TestValidate_TypeDispatch(t *testing.T) {
 			name: "agent-skill import with FilePath is accepted",
 			cfg: importerconfig.Config{
 				Type:     importerconfig.ImportTypeAgentSkill,
+				FilePath: testFilePath,
+				Enricher: staticEnricher(),
+			},
+		},
+		{
+			name: "oasf file import with FilePath is accepted",
+			cfg: importerconfig.Config{
+				Type:     importerconfig.ImportTypeOASF,
 				FilePath: testFilePath,
 				Enricher: staticEnricher(),
 			},
