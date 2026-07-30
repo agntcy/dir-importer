@@ -13,7 +13,8 @@ import (
 )
 
 // OASF field names written by the enrichment stage, which runs AFTER dedup in
-// the pipeline. Exported for reuse in tests.
+// the pipeline. Package-private; the dedup tests live in this package and
+// reference them directly.
 const (
 	skillsField  = "skills"
 	domainsField = "domains"

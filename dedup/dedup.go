@@ -277,9 +277,15 @@ func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan 
 // isDuplicate checks if a source item is a duplicate of an existing directory
 // record by comparing content hashes. It transforms the source item to its
 // pre-enrichment OASF representation (the same conversion the transform stage
-// performs) and hashes that, so records that share a name@version but differ
-// in content are no longer treated as duplicates, and records with identical
-// content are - regardless of name@version.
+// performs) and hashes that.
+//
+// Name and version are part of the hashed content, not stripped from it. Two
+// records are duplicates when their whole pre-enrichment content matches,
+// which includes matching on name@version. The change from the previous
+// name@version-only comparison is that content is now checked too: records
+// sharing a name@version but differing in content are no longer treated as
+// duplicates, and an updated record under an unchanged name@version is
+// correctly seen as new.
 //
 // c.transform must be non-nil for FilterDuplicates to detect anything;
 // NewDuplicateChecker's contract is to always set it. It is nil-guarded here

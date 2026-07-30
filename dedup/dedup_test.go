@@ -123,6 +123,10 @@ func testTransform(item types.SourceItem) (*corev1.Record, error) {
 		return &corev1.Record{Data: item.A2A}, nil
 	case types.SourceKindAgentSkill:
 		return &corev1.Record{Data: item.Skill}, nil
+	case types.SourceKindOASF:
+		// Already OASF, so the stand-in passes it through the way the real
+		// transformer does. Added when #62 introduced this kind.
+		return &corev1.Record{Data: item.OASF}, nil
 	default:
 		return nil, fmt.Errorf("testTransform: unsupported source kind: %v", item.Kind)
 	}
@@ -544,6 +548,58 @@ func TestFilterDuplicates_AgentSkillSkipsKnownDuplicate(t *testing.T) {
 
 	if result.SkippedCount != 1 {
 		t.Errorf("SkippedCount = %d, want 1", result.SkippedCount)
+	}
+}
+
+// TestNewDuplicateChecker_StripsEnrichmentFromDirectoryRecords covers the
+// asymmetry the whole change rests on: records pulled from the directory are
+// post-enrichment (they carry skills and domains), while items hashed on the
+// import side are pre-enrichment. buildCache therefore has to hash the
+// STRIPPED record, not its raw CID, or no import item can ever match a
+// directory record that has been enriched.
+//
+// The other buildCache tests use fixtures with no skills or domains, where
+// contentHash and GetCid happen to agree, so they pass either way. This one
+// gives the pulled record enrichment fields, which makes the two diverge, and
+// fails if buildCache stops stripping.
+func TestNewDuplicateChecker_StripsEnrichmentFromDirectoryRecords(t *testing.T) {
+	t.Parallel()
+
+	enriched := recordWith("demo", "1.0.0")
+	enriched.GetData().GetFields()[skillsField] = structpb.NewListValue(&structpb.ListValue{
+		Values: []*structpb.Value{structpb.NewStringValue("natural_language_processing")},
+	})
+	enriched.GetData().GetFields()[domainsField] = structpb.NewListValue(&structpb.ListValue{
+		Values: []*structpb.Value{structpb.NewStringValue("technology")},
+	})
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			return newStubStreamResult([]string{cidBafy1}, nil), nil
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			return []*corev1.Record{enriched}, nil
+		},
+	}
+
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, nil)
+	if err != nil {
+		t.Fatalf("NewDuplicateChecker err = %v", err)
+	}
+
+	// The hash an import-side item would produce: same content, no enrichment.
+	wantHash := mustContentHash(t, recordWith("demo", "1.0.0").GetData())
+
+	if _, ok := checker.existingRecords[wantHash]; !ok {
+		t.Fatalf("cache is keyed on the unstripped record, so a pre-enrichment item can never match it.\nwant key %q\ngot keys %v", wantHash, checker.existingRecords)
+	}
+
+	// And the raw CID of the enriched record must NOT be what got cached,
+	// which is what distinguishes stripping from not stripping.
+	if rawCID := enriched.GetCid(); rawCID != wantHash {
+		if _, ok := checker.existingRecords[rawCID]; ok {
+			t.Errorf("cache contains the unstripped CID %q; buildCache is not stripping enrichment fields", rawCID)
+		}
 	}
 }
 
