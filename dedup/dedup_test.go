@@ -88,16 +88,59 @@ func (s *stubClient) PullBatch(ctx context.Context, refs []*corev1.RecordRef) ([
 }
 
 // recordWith returns a corev1.Record whose Data has the given name/version.
-// shared.ExtractNameVersion reads only those two fields.
 func recordWith(name, version string) *corev1.Record {
-	return &corev1.Record{
-		Data: &structpb.Struct{
-			Fields: map[string]*structpb.Value{
-				fieldName:    structpb.NewStringValue(name),
-				fieldVersion: structpb.NewStringValue(version),
-			},
-		},
+	return recordWithDescription(name, version, "")
+}
+
+// recordWithDescription returns a corev1.Record whose Data has the given
+// name/version and, when non-empty, a "description" field. The description
+// lets tests vary content independently of name@version.
+func recordWithDescription(name, version, description string) *corev1.Record {
+	fields := map[string]*structpb.Value{
+		fieldName:    structpb.NewStringValue(name),
+		fieldVersion: structpb.NewStringValue(version),
 	}
+
+	if description != "" {
+		fields["description"] = structpb.NewStringValue(description)
+	}
+
+	return &corev1.Record{
+		Data: &structpb.Struct{Fields: fields},
+	}
+}
+
+// testTransform stands in for (*transformer.Transformer).TransformRecord in
+// these tests. It builds record data directly from the source item's own
+// fields (name, version, and - for MCP - description) so tests can control
+// hashed content independently of name@version, without depending on the
+// real OASF translator.
+func testTransform(item types.SourceItem) (*corev1.Record, error) {
+	switch item.Kind {
+	case types.SourceKindMCP:
+		return recordWithDescription(item.MCP.Server.Name, item.MCP.Server.Version, item.MCP.Server.Description), nil
+	case types.SourceKindA2A:
+		return &corev1.Record{Data: item.A2A}, nil
+	case types.SourceKindAgentSkill:
+		return &corev1.Record{Data: item.Skill}, nil
+	case types.SourceKindOASF:
+		// Already OASF, so the stand-in passes it through the way the real
+		// transformer does. Added when #62 introduced this kind.
+		return &corev1.Record{Data: item.OASF}, nil
+	default:
+		return nil, fmt.Errorf("testTransform: unsupported source kind: %v", item.Kind)
+	}
+}
+
+func mustContentHash(t *testing.T, data *structpb.Struct) string {
+	t.Helper()
+
+	hash, err := contentHash(data)
+	if err != nil {
+		t.Fatalf("contentHash err = %v", err)
+	}
+
+	return hash
 }
 
 func TestFilterDuplicates_SkipsKnownDuplicate(t *testing.T) {
@@ -106,8 +149,11 @@ func TestFilterDuplicates_SkipsKnownDuplicate(t *testing.T) {
 	ctx := context.Background()
 	result := &types.Result{}
 
+	dupHash := mustContentHash(t, recordWith("dup", "1.0.0").GetData())
+
 	c := &DuplicateChecker{
-		existingRecords: map[string]string{"dup@1.0.0": "bafycid"},
+		transform:       testTransform,
+		existingRecords: map[string]cacheEntry{dupHash: {cid: "bafycid", nameVersion: "dup@1.0.0"}},
 	}
 
 	in := make(chan types.SourceItem, 2)
@@ -145,7 +191,7 @@ func TestFilterDuplicates_PassThroughWhenUnknown(t *testing.T) {
 	ctx := context.Background()
 	result := &types.Result{}
 
-	c := &DuplicateChecker{existingRecords: map[string]string{}}
+	c := &DuplicateChecker{transform: testTransform, existingRecords: map[string]cacheEntry{}}
 
 	in := make(chan types.SourceItem, 1)
 	in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "only", Version: "1"}})
@@ -166,6 +212,173 @@ func TestFilterDuplicates_PassThroughWhenUnknown(t *testing.T) {
 
 	if result.SkippedCount != 0 {
 		t.Errorf("SkippedCount = %d", result.SkippedCount)
+	}
+}
+
+// TestFilterDuplicates_HashCoversFullContent exercises the two directions
+// called out in issue #54's motivation, and one deliberate design decision:
+//
+//   - "content changed, same name@version": the false-negative case - a
+//     record keeps the same name@version as one already in the directory,
+//     but its content (here, description) changed. Must NOT be a duplicate.
+//   - "different name, otherwise identical": a design decision - the hash
+//     covers the full translator output, including "name" and "version"
+//     (genuine OASF fields, unlike enrichment artifacts skills/domains). So
+//     two records differing only by name are never duplicates, even if every
+//     other field agrees.
+//   - "identical content": the base case - a record whose full content
+//     (including name/version) matches one already cached IS a duplicate.
+func TestFilterDuplicates_HashCoversFullContent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		existingName        = "dup"
+		existingVersion     = "1.0.0"
+		existingDescription = "original description"
+	)
+
+	existingHash := mustContentHash(t, recordWithDescription(existingName, existingVersion, existingDescription).GetData())
+
+	tests := []struct {
+		name           string
+		item           mcpapiv0.ServerJSON
+		wantDuplicate  bool
+		wantAssertNote string
+	}{
+		{
+			name: "content changed, same name@version -> not a duplicate",
+			item: mcpapiv0.ServerJSON{
+				Name: existingName, Version: existingVersion, Description: "updated description",
+			},
+			wantDuplicate:  false,
+			wantAssertNote: "content differs; must not be treated as a duplicate",
+		},
+		{
+			name: "different name, identical version/description -> not a duplicate",
+			item: mcpapiv0.ServerJSON{
+				Name: "not-" + existingName, Version: existingVersion, Description: existingDescription,
+			},
+			wantDuplicate:  false,
+			wantAssertNote: "different name is different content, not a duplicate",
+		},
+		{
+			name: "identical content (including name@version) -> a duplicate",
+			item: mcpapiv0.ServerJSON{
+				Name: existingName, Version: existingVersion, Description: existingDescription,
+			},
+			wantDuplicate:  true,
+			wantAssertNote: "identical content must be treated as a duplicate",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			result := &types.Result{}
+
+			c := &DuplicateChecker{
+				transform:       testTransform,
+				existingRecords: map[string]cacheEntry{existingHash: {cid: "bafyold", nameVersion: existingName + "@" + existingVersion}},
+			}
+
+			in := make(chan types.SourceItem, 1)
+
+			in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: tc.item})
+
+			close(in)
+
+			out := c.FilterDuplicates(ctx, in, result)
+
+			var passed int
+
+			for range out {
+				passed++
+			}
+
+			wantPassed := 1
+			if tc.wantDuplicate {
+				wantPassed = 0
+			}
+
+			if passed != wantPassed {
+				t.Errorf("passed through = %d, want %d (%s)", passed, wantPassed, tc.wantAssertNote)
+			}
+
+			wantSkipped := 0
+			if tc.wantDuplicate {
+				wantSkipped = 1
+			}
+
+			if result.SkippedCount != wantSkipped {
+				t.Errorf("SkippedCount = %d, want %d", result.SkippedCount, wantSkipped)
+			}
+		})
+	}
+}
+
+// TestFilterDuplicates_FailsSafeWhenCannotHash covers the fail-safe branches
+// of isDuplicate: whenever an item cannot be reduced to a content hash it must
+// be treated as NOT a duplicate and passed through (so the transform stage
+// processes and reports it normally) rather than silently dropped. The three
+// ways hashing can be skipped are exercised here.
+func TestFilterDuplicates_FailsSafeWhenCannotHash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		transform RecordTransformer
+	}{
+		{
+			name:      "nil transform",
+			transform: nil,
+		},
+		{
+			name:      "transform returns error",
+			transform: func(types.SourceItem) (*corev1.Record, error) { return nil, errors.New("boom") },
+		},
+		{
+			name:      "transform returns record with nil data",
+			transform: func(types.SourceItem) (*corev1.Record, error) { return &corev1.Record{}, nil },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			result := &types.Result{}
+
+			// A populated cache proves the pass-through is due to the
+			// fail-safe branch, not an empty cache.
+			c := &DuplicateChecker{
+				transform:       tc.transform,
+				existingRecords: map[string]cacheEntry{"somehash": {cid: "bafyx", nameVersion: "x@1"}},
+			}
+
+			in := make(chan types.SourceItem, 1)
+			in <- types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{Name: "x", Version: "1"}})
+
+			close(in)
+
+			out := c.FilterDuplicates(ctx, in, result)
+
+			var passed int
+
+			for range out {
+				passed++
+			}
+
+			if passed != 1 {
+				t.Errorf("passed through = %d, want 1 (un-hashable item must fail safe and pass through)", passed)
+			}
+
+			if result.SkippedCount != 0 {
+				t.Errorf("SkippedCount = %d, want 0 (un-hashable item must not be skipped as a duplicate)", result.SkippedCount)
+			}
+		})
 	}
 }
 
@@ -242,11 +455,6 @@ func TestFilterDuplicates_A2ASkipsKnownDuplicate(t *testing.T) {
 	ctx := context.Background()
 	result := &types.Result{}
 
-	c := &DuplicateChecker{
-		importType:      config.ImportTypeA2A,
-		existingRecords: map[string]string{"my-agent@v1.0.0": "bafycid123"},
-	}
-
 	card, err := structpb.NewStruct(map[string]any{fieldName: "my-agent", fieldVersion: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("failed to create A2A struct: %v", err)
@@ -255,6 +463,14 @@ func TestFilterDuplicates_A2ASkipsKnownDuplicate(t *testing.T) {
 	newCard, err := structpb.NewStruct(map[string]any{fieldName: "other-agent", fieldVersion: "v2.0.0"})
 	if err != nil {
 		t.Fatalf("failed to create A2A struct: %v", err)
+	}
+
+	cardHash := mustContentHash(t, card)
+
+	c := &DuplicateChecker{
+		importType:      config.ImportTypeA2A,
+		transform:       testTransform,
+		existingRecords: map[string]cacheEntry{cardHash: {cid: "bafycid123", nameVersion: "my-agent@v1.0.0"}},
 	}
 
 	in := make(chan types.SourceItem, 2)
@@ -287,11 +503,6 @@ func TestFilterDuplicates_AgentSkillSkipsKnownDuplicate(t *testing.T) {
 	ctx := context.Background()
 	result := &types.Result{}
 
-	c := &DuplicateChecker{
-		importType:      config.ImportTypeAgentSkill,
-		existingRecords: map[string]string{"my-skill@v1.0.0": "bafycid456"},
-	}
-
 	skill, err := structpb.NewStruct(map[string]any{
 		fieldName:  "my-skill",
 		"metadata": map[string]any{fieldVersion: "v1.0.0"},
@@ -306,6 +517,14 @@ func TestFilterDuplicates_AgentSkillSkipsKnownDuplicate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("failed to create skill struct: %v", err)
+	}
+
+	skillHash := mustContentHash(t, skill)
+
+	c := &DuplicateChecker{
+		importType:      config.ImportTypeAgentSkill,
+		transform:       testTransform,
+		existingRecords: map[string]cacheEntry{skillHash: {cid: "bafycid456", nameVersion: "my-skill@v1.0.0"}},
 	}
 
 	in := make(chan types.SourceItem, 2)
@@ -332,10 +551,60 @@ func TestFilterDuplicates_AgentSkillSkipsKnownDuplicate(t *testing.T) {
 	}
 }
 
-func TestNewDuplicateChecker_PopulatesCache(t *testing.T) {
+// TestNewDuplicateChecker_StripsEnrichmentFromDirectoryRecords covers the
+// asymmetry the whole change rests on: records pulled from the directory are
+// post-enrichment (they carry skills and domains), while items hashed on the
+// import side are pre-enrichment. buildCache therefore has to hash the
+// STRIPPED record, not its raw CID, or no import item can ever match a
+// directory record that has been enriched.
+//
+// The other buildCache tests use fixtures with no skills or domains, where
+// contentHash and GetCid happen to agree, so they pass either way. This one
+// gives the pulled record enrichment fields, which makes the two diverge, and
+// fails if buildCache stops stripping.
+func TestNewDuplicateChecker_StripsEnrichmentFromDirectoryRecords(t *testing.T) {
 	t.Parallel()
 
-	wantNV := "demo@1.0.0"
+	enriched := recordWith("demo", "1.0.0")
+	enriched.GetData().GetFields()[skillsField] = structpb.NewListValue(&structpb.ListValue{
+		Values: []*structpb.Value{structpb.NewStringValue("natural_language_processing")},
+	})
+	enriched.GetData().GetFields()[domainsField] = structpb.NewListValue(&structpb.ListValue{
+		Values: []*structpb.Value{structpb.NewStringValue("technology")},
+	})
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			return newStubStreamResult([]string{cidBafy1}, nil), nil
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			return []*corev1.Record{enriched}, nil
+		},
+	}
+
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, nil)
+	if err != nil {
+		t.Fatalf("NewDuplicateChecker err = %v", err)
+	}
+
+	// The hash an import-side item would produce: same content, no enrichment.
+	wantHash := mustContentHash(t, recordWith("demo", "1.0.0").GetData())
+
+	if _, ok := checker.existingRecords[wantHash]; !ok {
+		t.Fatalf("cache is keyed on the unstripped record, so a pre-enrichment item can never match it.\nwant key %q\ngot keys %v", wantHash, checker.existingRecords)
+	}
+
+	// And the raw CID of the enriched record must NOT be what got cached,
+	// which is what distinguishes stripping from not stripping.
+	if rawCID := enriched.GetCid(); rawCID != wantHash {
+		if _, ok := checker.existingRecords[rawCID]; ok {
+			t.Errorf("cache contains the unstripped CID %q; buildCache is not stripping enrichment fields", rawCID)
+		}
+	}
+}
+
+func TestNewDuplicateChecker_PopulatesCache(t *testing.T) {
+	t.Parallel()
 
 	client := &stubClient{
 		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
@@ -350,17 +619,28 @@ func TestNewDuplicateChecker_PopulatesCache(t *testing.T) {
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, nil)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
-	if _, ok := checker.existingRecords[wantNV]; !ok {
-		t.Errorf("cache missing %q; got %v", wantNV, checker.existingRecords)
+	wantHash := mustContentHash(t, recordWith("demo", "1.0.0").GetData())
+
+	entry, ok := checker.existingRecords[wantHash]
+	if !ok {
+		t.Fatalf("cache missing content hash %q; got %v", wantHash, checker.existingRecords)
+	}
+
+	if entry.nameVersion != "demo@1.0.0" {
+		t.Errorf("cache entry nameVersion = %q, want %q (ExtractNameVersion should still be used for logging)", entry.nameVersion, "demo@1.0.0")
 	}
 }
 
-func TestNewDuplicateChecker_SkipsRecordsWithoutNameVersion(t *testing.T) {
+// TestNewDuplicateChecker_SkipsRecordsWithoutData verifies that records with
+// no Data at all (so no content to hash) are excluded from the cache. Unlike
+// the old name@version scheme, a record with empty-but-present Data (no
+// name/version fields) is still hashable and IS cached.
+func TestNewDuplicateChecker_SkipsRecordsWithoutData(t *testing.T) {
 	t.Parallel()
 
 	client := &stubClient{
@@ -369,23 +649,25 @@ func TestNewDuplicateChecker_SkipsRecordsWithoutNameVersion(t *testing.T) {
 		},
 		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
 			return []*corev1.Record{
-				{Data: &structpb.Struct{Fields: map[string]*structpb.Value{}}},
+				{}, // no Data - cannot be hashed, must be skipped
 				recordWith("kept", "9.9.9"),
 			}, nil
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false, nil)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
-	if _, ok := checker.existingRecords["kept@9.9.9"]; !ok {
-		t.Error("expected kept@9.9.9 in cache")
+	wantHash := mustContentHash(t, recordWith("kept", "9.9.9").GetData())
+
+	if _, ok := checker.existingRecords[wantHash]; !ok {
+		t.Error("expected kept@9.9.9 content hash in cache")
 	}
 
 	if len(checker.existingRecords) != 1 {
-		t.Errorf("cache size = %d, want 1 (record without name/version should be skipped)", len(checker.existingRecords))
+		t.Errorf("cache size = %d, want 1 (record without data should be skipped)", len(checker.existingRecords))
 	}
 }
 
@@ -404,7 +686,7 @@ func TestNewDuplicateChecker_UnknownImportTypeFallsBackToAllModules(t *testing.T
 		},
 	}
 
-	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false); err != nil {
+	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false, nil); err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
@@ -436,7 +718,7 @@ func TestNewDuplicateChecker_SearchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, nil)
 	if err == nil {
 		t.Fatal("expected error from SearchCIDs failure")
 	}
@@ -451,7 +733,7 @@ func TestNewDuplicateChecker_StreamError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false, nil)
 	if err == nil {
 		t.Fatal("expected error from stream ErrCh")
 	}
@@ -469,7 +751,7 @@ func TestNewDuplicateChecker_PullBatchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, nil)
 	if err == nil {
 		t.Fatal("expected error from PullBatch failure")
 	}
@@ -494,7 +776,7 @@ func TestNewDuplicateChecker_ContextCancelledDuringStream(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false)
+	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false, nil)
 	if err == nil {
 		t.Fatal("expected error when context is cancelled mid-stream")
 	}

@@ -44,26 +44,46 @@ var modulesByImportType = map[config.ImportType][]string{
 	config.ImportTypeAgentSkill:  {moduleAgentSkillName},
 }
 
-// DuplicateChecker checks for duplicate records by comparing name@version
-// against existing records in the directory. It queries only the modules that
-// are relevant for the configured import type.
+// RecordTransformer converts a fetched source item into its OASF record
+// representation, the same conversion the pipeline's transform stage
+// performs, but run here (pre-enrichment) purely to obtain content to hash
+// for duplicate detection. Implemented by (*transformer.Transformer).TransformRecord.
+type RecordTransformer func(types.SourceItem) (*corev1.Record, error)
+
+// cacheEntry pairs a cached record's real CID with its name@version. The
+// name@version is kept only for debug logging - shared.ExtractNameVersion is
+// preserved for that purpose even though it is no longer part of the
+// duplicate-detection key.
+type cacheEntry struct {
+	cid         string
+	nameVersion string // best-effort; "" if the record had no name/version fields
+}
+
+// DuplicateChecker checks for duplicate records by comparing content hashes
+// against existing records in the directory, instead of name@version. It
+// queries only the modules that are relevant for the configured import type.
 type DuplicateChecker struct {
 	client          config.ClientInterface
 	importType      config.ImportType
 	debug           bool
-	existingRecords map[string]string // map[name@version]cid
+	transform       RecordTransformer
+	existingRecords map[string]cacheEntry // map[content hash]cacheEntry
 	mu              sync.RWMutex
 }
 
 // NewDuplicateChecker creates a new duplicate checker for the given import type.
 // It queries the directory for all existing records of the relevant module(s)
-// and builds an in-memory cache.
-func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, importType config.ImportType, debug bool) (*DuplicateChecker, error) {
+// and builds an in-memory cache keyed by content hash. transform is used to
+// convert each fetched source item to its pre-enrichment OASF representation
+// so it can be hashed the same way the directory-side cache is; pass the
+// pipeline's transformer.TransformRecord.
+func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, importType config.ImportType, debug bool, transform RecordTransformer) (*DuplicateChecker, error) {
 	checker := &DuplicateChecker{
 		client:          client,
 		importType:      importType,
 		debug:           debug,
-		existingRecords: make(map[string]string),
+		transform:       transform,
+		existingRecords: make(map[string]cacheEntry),
 	}
 
 	if err := checker.buildCache(ctx); err != nil {
@@ -80,7 +100,7 @@ func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, imp
 
 // buildCache queries the directory for records belonging to the modules that
 // correspond to the configured import type. It uses pagination and builds an
-// in-memory cache of name@version combinations.
+// in-memory cache keyed by content hash.
 //
 //nolint:gocognit,cyclop // Complexity is acceptable for building cache from multiple modules
 func (c *DuplicateChecker) buildCache(ctx context.Context) error {
@@ -159,16 +179,25 @@ func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 				return fmt.Errorf("failed to pull existing %s records: %w", module, err)
 			}
 
-			// Build the cache: name@version -> cid
+			// Build the cache: content hash -> cacheEntry(cid, name@version).
+			// Pulled records have already been through enrichment, so their
+			// enrichment-added fields (skills, domains) are stripped before
+			// hashing to make the hash comparable with the pre-enrichment
+			// hash computed on the import side.
 			c.mu.Lock()
 
 			for _, record := range records {
-				nameVersion, err := shared.ExtractNameVersion(record)
+				hash, err := contentHash(record.GetData())
 				if err != nil {
+					// No hashable content (e.g. record has no data) - skip.
 					continue
 				}
 
-				c.existingRecords[nameVersion] = record.GetCid()
+				// Preserved for debug logging only; a missing name/version no
+				// longer excludes a record from the cache.
+				nameVersion, _ := shared.ExtractNameVersion(record)
+
+				c.existingRecords[hash] = cacheEntry{cid: record.GetCid(), nameVersion: nameVersion}
 			}
 
 			c.mu.Unlock()
@@ -245,21 +274,59 @@ func (c *DuplicateChecker) FilterDuplicates(ctx context.Context, inputCh <-chan 
 	return outputCh
 }
 
-// isDuplicate checks if a source item is a duplicate of an existing directory record.
+// isDuplicate checks if a source item is a duplicate of an existing directory
+// record by comparing content hashes. It transforms the source item to its
+// pre-enrichment OASF representation (the same conversion the transform stage
+// performs) and hashes that.
+//
+// Name and version are part of the hashed content, not stripped from it. Two
+// records are duplicates when their whole pre-enrichment content matches,
+// which includes matching on name@version. The change from the previous
+// name@version-only comparison is that content is now checked too: records
+// sharing a name@version but differing in content are no longer treated as
+// duplicates, and an updated record under an unchanged name@version is
+// correctly seen as new.
+//
+// c.transform must be non-nil for FilterDuplicates to detect anything;
+// NewDuplicateChecker's contract is to always set it. It is nil-guarded here
+// only because tests build DuplicateChecker literals directly (some legitimately
+// don't exercise FilterDuplicates and pass nil), so a nil transform fails
+// safe - "not a duplicate" - instead of panicking.
 func (c *DuplicateChecker) isDuplicate(source types.SourceItem) bool {
-	nameVersion := source.NameVersion()
-	if nameVersion == "" {
+	if c.transform == nil {
+		return false
+	}
+
+	record, err := c.transform(source)
+	if err != nil {
+		// Can't transform, so can't hash - not a duplicate. The transform
+		// stage will process (and report) this item's error normally.
+		return false
+	}
+
+	hash, err := contentHash(record.GetData())
+	if err != nil {
 		// Can't determine - not a duplicate (will be processed)
 		return false
 	}
 
-	// Check if record already exists
+	// Check if a record with this content hash already exists
 	c.mu.RLock()
-	_, exists := c.existingRecords[nameVersion]
+	entry, exists := c.existingRecords[hash]
 	c.mu.RUnlock()
 
 	if exists && c.debug {
-		fmt.Fprintf(os.Stderr, "[DEDUP] %s is a duplicate\n", nameVersion)
+		nv := source.NameVersion()
+		if nv == "" {
+			nv = "(unknown)"
+		}
+
+		existingNV := entry.nameVersion
+		if existingNV == "" {
+			existingNV = "(unknown)"
+		}
+
+		fmt.Fprintf(os.Stderr, "[DEDUP] %s is a duplicate of existing record %s (cid=%s, hash=%s)\n", nv, existingNV, entry.cid, hash)
 		os.Stderr.Sync()
 	}
 
