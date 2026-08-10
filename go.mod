@@ -10,7 +10,7 @@ require (
 	github.com/mark3labs/mcp-go v0.57.0
 	github.com/modelcontextprotocol/registry v1.8.0
 	github.com/sashabaranov/go-openai v1.41.2
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
+	google.golang.org/protobuf v1.36.12-0.20260810121128-40223a3a698d
 	gopkg.in/yaml.v3 v3.0.1
 )
 
