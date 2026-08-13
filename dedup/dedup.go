@@ -77,7 +77,7 @@ type DuplicateChecker struct {
 // convert each fetched source item to its pre-enrichment OASF representation
 // so it can be hashed the same way the directory-side cache is; pass the
 // pipeline's transformer.TransformRecord.
-func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, importType config.ImportType, debug bool, transform RecordTransformer) (*DuplicateChecker, error) {
+func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, importType config.ImportType, debug, force bool, transform RecordTransformer) (*DuplicateChecker, error) {
 	checker := &DuplicateChecker{
 		client:          client,
 		importType:      importType,
@@ -86,13 +86,15 @@ func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, imp
 		existingRecords: make(map[string]cacheEntry),
 	}
 
-	if err := checker.buildCache(ctx); err != nil {
-		return nil, fmt.Errorf("failed to build duplicate cache: %w", err)
-	}
+	if !force {
+		if err := checker.buildCache(ctx); err != nil {
+			return nil, fmt.Errorf("failed to build duplicate cache: %w", err)
+		}
 
-	if debug {
-		fmt.Fprintf(os.Stderr, "[DEDUP] Cache built with %d existing %s records\n", len(checker.existingRecords), importType)
-		os.Stderr.Sync()
+		if debug {
+			fmt.Fprintf(os.Stderr, "[DEDUP] Cache built with %d existing %s records\n", len(checker.existingRecords), importType)
+			os.Stderr.Sync()
+		}
 	}
 
 	return checker, nil
