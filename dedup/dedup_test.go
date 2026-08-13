@@ -582,7 +582,7 @@ func TestNewDuplicateChecker_StripsEnrichmentFromDirectoryRecords(t *testing.T) 
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, nil)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, false, nil)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
@@ -619,7 +619,7 @@ func TestNewDuplicateChecker_PopulatesCache(t *testing.T) {
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, nil)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, false, nil)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
@@ -655,7 +655,7 @@ func TestNewDuplicateChecker_SkipsRecordsWithoutData(t *testing.T) {
 		},
 	}
 
-	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false, nil)
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeA2A, false, false, nil)
 	if err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
@@ -686,7 +686,7 @@ func TestNewDuplicateChecker_UnknownImportTypeFallsBackToAllModules(t *testing.T
 		},
 	}
 
-	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false, nil); err != nil {
+	if _, err := NewDuplicateChecker(context.Background(), client, config.ImportType("unknown-type"), false, false, nil); err != nil {
 		t.Fatalf("NewDuplicateChecker err = %v", err)
 	}
 
@@ -718,7 +718,7 @@ func TestNewDuplicateChecker_SearchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, nil)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error from SearchCIDs failure")
 	}
@@ -733,7 +733,7 @@ func TestNewDuplicateChecker_StreamError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false, nil)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeAgentSkill, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error from stream ErrCh")
 	}
@@ -751,7 +751,7 @@ func TestNewDuplicateChecker_PullBatchError(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, nil)
+	_, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCP, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error from PullBatch failure")
 	}
@@ -776,8 +776,34 @@ func TestNewDuplicateChecker_ContextCancelledDuringStream(t *testing.T) {
 		},
 	}
 
-	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false, nil)
+	_, err := NewDuplicateChecker(ctx, client, config.ImportTypeMCP, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when context is cancelled mid-stream")
+	}
+}
+
+func TestNewDuplicateChecker_ForceSkipsCacheBuild(t *testing.T) {
+	t.Parallel()
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, _ *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			t.Fatal("SearchCIDs must not be called when force is true")
+
+			return nil, errors.New("unreachable")
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			t.Fatal("PullBatch must not be called when force is true")
+
+			return nil, errors.New("unreachable")
+		},
+	}
+
+	checker, err := NewDuplicateChecker(context.Background(), client, config.ImportTypeMCPRegistry, false, true, nil)
+	if err != nil {
+		t.Fatalf("NewDuplicateChecker(force) err = %v", err)
+	}
+
+	if len(checker.existingRecords) != 0 {
+		t.Errorf("cache size = %d, want 0 when force skips buildCache", len(checker.existingRecords))
 	}
 }
