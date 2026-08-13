@@ -105,7 +105,7 @@ func NewDuplicateChecker(ctx context.Context, client config.ClientInterface, imp
 //nolint:gocognit,cyclop // Complexity is acceptable for building cache from multiple modules
 func (c *DuplicateChecker) buildCache(ctx context.Context) error {
 	const (
-		batchSize  = 100   // Process 100 records at a time
+		batchSize  = 20    // Process 20 records at a time
 		maxRecords = 50000 // Safety limit to prevent unbounded memory growth
 	)
 
