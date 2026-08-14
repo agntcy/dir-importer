@@ -54,7 +54,7 @@ func (f *oasfFileFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <
 // are skipped and errors are sent to errCh (best-effort; may drop an error if
 // errCh blocks).
 func decodeOASFRoot(ctx context.Context, raw []byte, errCh chan<- error) ([]map[string]any, error) {
-	return decodeStructRoot(ctx, raw, errCh)
+	return decodeStructRoot(ctx, raw, errCh, "")
 }
 
 func oasfRecordStructFromMap(record map[string]any) (*structpb.Struct, error) {

@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/agntcy/dir-importer/types"
@@ -48,19 +46,16 @@ func (f *mcpFileFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-
 		defer close(outputCh)
 		defer close(errCh)
 
-		paths, err := inputPaths(ctx, f.path)
+		inputs, err := openInputs(ctx, f.path)
 		if err != nil {
 			sendStructErr(ctx, errCh, err)
 
 			return
 		}
+		defer inputs.close()
 
-		// Only qualify messages with a file name when there is more than one
-		// file, so single-file errors stay exactly as they were.
-		multi := len(paths) > 1
-
-		for _, path := range paths {
-			if canceled := emitServersFromFile(ctx, path, multi, outputCh, errCh); canceled {
+		for _, name := range inputs.names {
+			if canceled := emitServersFromFile(ctx, inputs, name, outputCh, errCh); canceled {
 				return
 			}
 		}
@@ -74,17 +69,14 @@ func (f *mcpFileFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-
 // canceled, which tells the caller to stop processing further files.
 func emitServersFromFile(
 	ctx context.Context,
-	path string,
-	multi bool,
+	inputs *inputSet,
+	name string,
 	outputCh chan<- types.SourceItem,
 	errCh chan<- error,
 ) bool {
-	where := ""
-	if multi {
-		where = filepath.Base(path) + ": "
-	}
+	where := inputs.label(name)
 
-	raw, err := os.ReadFile(path)
+	raw, err := inputs.read(name)
 	if err != nil {
 		sendStructErr(ctx, errCh, fmt.Errorf("%sread file: %w", where, err))
 

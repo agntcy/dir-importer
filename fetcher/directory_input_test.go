@@ -431,6 +431,39 @@ func TestFileFetchers_DirectoryStopsOnCanceledContext(t *testing.T) {
 	}
 }
 
+// Errors raised for individual array elements are reported from inside the
+// decoder, so they need the same file qualifier as every other per-file error.
+func TestA2AFileFetcher_Fetch_DirectoryQualifiesArrayElementErrors(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeInDir(t, dir, "batch.json", `[{"name":"good","version":"1.0.0"}, "not-an-object"]`)
+	writeInDir(t, dir, "other.json", `{"name":"second","version":"1.0.0"}`)
+
+	f, err := NewA2AFileFetcher(dir)
+	if err != nil {
+		t.Fatalf("NewA2AFileFetcher: %v", err)
+	}
+
+	items, errs := drainA2AFetch(f.Fetch(context.Background()))
+
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2 (the valid card in each file)", len(items))
+	}
+
+	var qualified bool
+
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "array index") && strings.Contains(e.Error(), "batch.json") {
+			qualified = true
+		}
+	}
+
+	if !qualified {
+		t.Errorf("errors %v should name the file the bad array element came from", errs)
+	}
+}
+
 // Single-file behaviour must be untouched: no file name is prefixed onto the
 // error when only one file is in play.
 func TestFileFetchers_SingleFileErrorsAreUnqualified(t *testing.T) {

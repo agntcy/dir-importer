@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/agntcy/dir-importer/types"
@@ -50,19 +48,16 @@ func fetchStructFile(ctx context.Context, cfg structFileFetcherConfig) (<-chan t
 		defer close(outputCh)
 		defer close(errCh)
 
-		paths, err := inputPaths(ctx, cfg.path)
+		inputs, err := openInputs(ctx, cfg.path)
 		if err != nil {
 			sendStructErr(ctx, errCh, err)
 
 			return
 		}
+		defer inputs.close()
 
-		// Only qualify messages with a file name when there is more than one
-		// file, so single-file errors stay exactly as they were.
-		multi := len(paths) > 1
-
-		for _, path := range paths {
-			if canceled := emitStructsFromFile(ctx, path, cfg, multi, outputCh, errCh); canceled {
+		for _, name := range inputs.names {
+			if canceled := emitStructsFromFile(ctx, inputs, name, cfg, outputCh, errCh); canceled {
 				return
 			}
 		}
@@ -78,18 +73,15 @@ func fetchStructFile(ctx context.Context, cfg structFileFetcherConfig) (<-chan t
 //nolint:cyclop // linear control flow with many ctx/errCh branches
 func emitStructsFromFile(
 	ctx context.Context,
-	path string,
+	inputs *inputSet,
+	name string,
 	cfg structFileFetcherConfig,
-	multi bool,
 	outputCh chan<- types.SourceItem,
 	errCh chan<- error,
 ) bool {
-	where := ""
-	if multi {
-		where = filepath.Base(path) + ": "
-	}
+	where := inputs.label(name)
 
-	raw, err := os.ReadFile(path)
+	raw, err := inputs.read(name)
 	if err != nil {
 		sendStructErr(ctx, errCh, fmt.Errorf("%sread file: %w", where, err))
 
@@ -98,7 +90,7 @@ func emitStructsFromFile(
 
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
 
-	items, fatalErr := decodeStructRoot(ctx, raw, errCh)
+	items, fatalErr := decodeStructRoot(ctx, raw, errCh, where)
 	if fatalErr != nil {
 		sendStructErr(ctx, errCh, fmt.Errorf("%s%w", where, fatalErr))
 
@@ -157,7 +149,11 @@ func structFromMap(m map[string]any, itemLabel string) (*structpb.Struct, error)
 // decodeStructRoot returns bare JSON object maps from raw. For a JSON array,
 // invalid elements are skipped and errors are sent to errCh (best-effort; may
 // drop an error if errCh blocks).
-func decodeStructRoot(ctx context.Context, raw []byte, errCh chan<- error) ([]map[string]any, error) {
+//
+// where qualifies those per-element errors with the file they came from, so
+// that they identify the source file like every other per-file error when a
+// directory is being read. It is empty when only one file is in play.
+func decodeStructRoot(ctx context.Context, raw []byte, errCh chan<- error, where string) ([]map[string]any, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return nil, errors.New("file is empty")
@@ -174,7 +170,7 @@ func decodeStructRoot(ctx context.Context, raw []byte, errCh chan<- error) ([]ma
 		for i, elt := range arr {
 			var m map[string]any
 			if err := json.Unmarshal(elt, &m); err != nil {
-				sendStructErr(ctx, errCh, fmt.Errorf("array index %d: %w", i, err))
+				sendStructErr(ctx, errCh, fmt.Errorf("%sarray index %d: %w", where, i, err))
 
 				continue
 			}
