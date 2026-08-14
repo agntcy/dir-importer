@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/agntcy/dir-importer/types"
@@ -21,7 +20,8 @@ type mcpFileFetcher struct {
 	path string
 }
 
-// NewMCPFileFetcher creates a fetcher that reads one or more MCP servers from a file.
+// NewMCPFileFetcher creates a fetcher that reads one or more MCP servers from a
+// file, or from every *.json file directly inside a directory.
 // Supported formats:
 //   - A JSON array of ServerResponse
 //   - A single bare ServerJSON object (wrapped as ServerResponse)
@@ -33,56 +33,80 @@ func NewMCPFileFetcher(path string) (*mcpFileFetcher, error) {
 	return &mcpFileFetcher{path: path}, nil
 }
 
-// Fetch reads the file and sends each decoded server to the output channel.
+// Fetch reads the configured path and sends each decoded server to the output
+// channel. When the path is a directory, a failure in one file is reported on
+// errCh without aborting the remaining files.
 func (f *mcpFileFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-chan error) {
-	outputCh := make(chan types.SourceItem, 8) //nolint:mnd
-	errCh := make(chan error, 1)
+	const chanBuf = 8
+
+	outputCh := make(chan types.SourceItem, chanBuf)
+	errCh := make(chan error, chanBuf)
 
 	go func() {
 		defer close(outputCh)
 		defer close(errCh)
 
-		raw, err := os.ReadFile(f.path)
+		inputs, err := openInputs(ctx, f.path)
 		if err != nil {
-			select {
-			case errCh <- fmt.Errorf("read file: %w", err):
-			case <-ctx.Done():
-			}
+			sendStructErr(ctx, errCh, err)
 
 			return
 		}
+		defer inputs.close()
 
-		raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
-
-		servers, err := decodeServerResponses(raw)
-		if err != nil {
-			select {
-			case errCh <- err:
-			case <-ctx.Done():
-			}
-
-			return
-		}
-
-		if len(servers) == 0 {
-			select {
-			case errCh <- errors.New("no MCP servers found in file"):
-			case <-ctx.Done():
-			}
-
-			return
-		}
-
-		for _, srv := range servers {
-			select {
-			case <-ctx.Done():
+		for _, name := range inputs.names {
+			if canceled := emitServersFromFile(ctx, inputs, name, outputCh, errCh); canceled {
 				return
-			case outputCh <- types.MCPSourceItem(srv):
 			}
 		}
 	}()
 
 	return outputCh, errCh
+}
+
+// emitServersFromFile reads one file and emits every server defined in it.
+// All failures are reported on errCh; it returns true only when ctx was
+// canceled, which tells the caller to stop processing further files.
+func emitServersFromFile(
+	ctx context.Context,
+	inputs *inputSet,
+	name string,
+	outputCh chan<- types.SourceItem,
+	errCh chan<- error,
+) bool {
+	where := inputs.label(name)
+
+	raw, err := inputs.read(name)
+	if err != nil {
+		sendStructErr(ctx, errCh, fmt.Errorf("%sread file: %w", where, err))
+
+		return ctx.Err() != nil
+	}
+
+	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
+
+	servers, err := decodeServerResponses(raw)
+	if err != nil {
+		sendStructErr(ctx, errCh, fmt.Errorf("%s%w", where, err))
+
+		return ctx.Err() != nil
+	}
+
+	if len(servers) == 0 {
+		sendStructErr(ctx, errCh, fmt.Errorf("%sno MCP servers found in file", where))
+
+		return ctx.Err() != nil
+	}
+
+	for _, srv := range servers {
+		select {
+		case <-ctx.Done():
+			return true
+		case outputCh <- types.MCPSourceItem(srv):
+		}
+	}
+
+	return false
 }
 
 func decodeServerResponses(raw []byte) ([]mcpapiv0.ServerResponse, error) {

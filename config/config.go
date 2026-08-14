@@ -20,9 +20,11 @@ type ImportType string
 const (
 	// ImportTypeMCPRegistry imports MCP server listings from an HTTP MCP registry (e.g. v0.1 list API).
 	ImportTypeMCPRegistry ImportType = "mcp-registry"
-	// ImportTypeMCP imports MCP server definition(s) from a local JSON file (one object or an array).
+	// ImportTypeMCP imports MCP server definition(s) from a local JSON file (one object or an array),
+	// or from a directory of such files (see FilePath).
 	ImportTypeMCP ImportType = "mcp"
-	// ImportTypeA2A imports A2A AgentCard JSON from a local file (one object or an array).
+	// ImportTypeA2A imports A2A AgentCard JSON from a local file (one object or an array),
+	// or from a directory of such files (see FilePath).
 	ImportTypeA2A ImportType = "a2a"
 	// ImportTypeAgentSkill imports Agent Skills packages (https://agentskills.io/specification).
 	// FilePath must be a skill directory or a root directory whose nested skill directories
@@ -31,7 +33,8 @@ const (
 	// skills with additional files are imported as application/agent-skills+gzip.
 	ImportTypeAgentSkill ImportType = "agent-skill"
 	// ImportTypeOASF imports record(s) already in OASF format from a local JSON file
-	// (one object or an array). This is the counterpart to --dry-run: the
+	// (one object or an array), or from a directory of such files (see FilePath).
+	// This is the counterpart to --dry-run: the
 	// <cid>.record.json files it writes can be reviewed, edited, and re-imported
 	// unchanged via this import type instead of switching to the separate push command.
 	ImportTypeOASF ImportType = "oasf"
@@ -50,14 +53,18 @@ type SignFunc func(ctx context.Context, cid string) error
 
 // Config contains configuration for an import operation.
 type Config struct {
-	Type        ImportType        // Import kind (--type); see ImportType* constants
-	RegistryURL string            // Base URL of the registry (when Type is registry-based)
-	FilePath    string            // Path to JSON file (when Type is file-based)
-	Filters     map[string]string // Registry-specific filters
-	Limit       int               // Number of records to import (default: 0 for all)
-	DryRun      bool              // If true, preview without actually importing
-	OutputDir   string            // Output directory for dry-run records; when empty, defaults to import-dry-run-<timestamp> in the current working directory
-	SignFunc    SignFunc          // Function to sign records (if set, signing is enabled)
+	Type        ImportType // Import kind (--type); see ImportType* constants
+	RegistryURL string     // Base URL of the registry (when Type is registry-based)
+	// FilePath is the source when Type is file-based. For mcp, a2a and oasf it is
+	// either a JSON file or a directory, in which case every *.json file directly
+	// inside it is imported (not recursive). For agent-skill it is a skill
+	// directory, or a root whose nested skill directories are found recursively.
+	FilePath  string
+	Filters   map[string]string // Registry-specific filters
+	Limit     int               // Number of records to import (default: 0 for all)
+	DryRun    bool              // If true, preview without actually importing
+	OutputDir string            // Output directory for dry-run records; when empty, defaults to import-dry-run-<timestamp> in the current working directory
+	SignFunc  SignFunc          // Function to sign records (if set, signing is enabled)
 
 	Force bool // If true, push even if record already exists
 	Debug bool // If true, enable verbose debug output

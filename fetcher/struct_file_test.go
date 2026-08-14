@@ -81,7 +81,7 @@ func TestDecodeStructRoot(t *testing.T) {
 			// per-element loop; draining happens after the call.
 			errCh := make(chan error, 16)
 
-			got, fatalErr := decodeStructRoot(context.Background(), []byte(tt.raw), errCh)
+			got, fatalErr := decodeStructRoot(context.Background(), []byte(tt.raw), errCh, "")
 
 			perElemErrs := drainErrs(errCh)
 
