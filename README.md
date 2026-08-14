@@ -22,11 +22,11 @@ go get github.com/agntcy/dir-importer
 Common tasks are exposed via [Taskfile](https://taskfile.dev):
 
 ```sh
-task build    # go build ./...
-task test     # unit tests
-task lint     # golangci-lint
-task license  # license check
-task tidy     # go mod tidy
+task build      # go build ./...
+task test:unit  # unit tests
+task lint       # golangci-lint
+task license    # license check
+task tidy       # go mod tidy
 ```
 
 To enable the pre-commit hook that runs `golangci-lint` on staged Go files:
