@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/agntcy/dir-importer/types"
@@ -36,7 +37,9 @@ type structFileFetcherConfig struct {
 // and emits each as a types.SourceItem via cfg.wrap. Invalid array elements are
 // reported on errCh and skipped.
 //
-//nolint:cyclop // linear control flow with many ctx/errCh branches
+// cfg.path may be either a single file or a directory. When it is a directory,
+// every *.json file directly inside it is read, and a failure in one file is
+// reported on errCh without aborting the remaining files.
 func fetchStructFile(ctx context.Context, cfg structFileFetcherConfig) (<-chan types.SourceItem, <-chan error) {
 	const chanBuf = 8
 
@@ -47,50 +50,88 @@ func fetchStructFile(ctx context.Context, cfg structFileFetcherConfig) (<-chan t
 		defer close(outputCh)
 		defer close(errCh)
 
-		raw, err := os.ReadFile(cfg.path)
+		paths, err := inputPaths(ctx, cfg.path)
 		if err != nil {
-			sendStructErr(ctx, errCh, fmt.Errorf("read file: %w", err))
+			sendStructErr(ctx, errCh, err)
 
 			return
 		}
 
-		raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
+		// Only qualify messages with a file name when there is more than one
+		// file, so single-file errors stay exactly as they were.
+		multi := len(paths) > 1
 
-		items, fatalErr := decodeStructRoot(ctx, raw, errCh)
-		if fatalErr != nil {
-			sendStructErr(ctx, errCh, fatalErr)
-
-			return
-		}
-
-		if len(items) == 0 {
-			sendStructErr(ctx, errCh,
-				fmt.Errorf("no %s found in file (check earlier errors if this was a JSON array)", cfg.collectionLabel))
-
-			return
-		}
-
-		for i, m := range items {
-			st, err := structFromMap(m, cfg.itemLabel)
-			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("%s index %d: %w", cfg.itemLabel, i, err):
-				case <-ctx.Done():
-					return
-				}
-
-				continue
-			}
-
-			select {
-			case <-ctx.Done():
+		for _, path := range paths {
+			if canceled := emitStructsFromFile(ctx, path, cfg, multi, outputCh, errCh); canceled {
 				return
-			case outputCh <- cfg.wrap(st):
 			}
 		}
 	}()
 
 	return outputCh, errCh
+}
+
+// emitStructsFromFile reads one file and emits every valid object in it.
+// All failures are reported on errCh; it returns true only when ctx was
+// canceled, which tells the caller to stop processing further files.
+//
+//nolint:cyclop // linear control flow with many ctx/errCh branches
+func emitStructsFromFile(
+	ctx context.Context,
+	path string,
+	cfg structFileFetcherConfig,
+	multi bool,
+	outputCh chan<- types.SourceItem,
+	errCh chan<- error,
+) bool {
+	where := ""
+	if multi {
+		where = filepath.Base(path) + ": "
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		sendStructErr(ctx, errCh, fmt.Errorf("%sread file: %w", where, err))
+
+		return ctx.Err() != nil
+	}
+
+	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // UTF-8 BOM
+
+	items, fatalErr := decodeStructRoot(ctx, raw, errCh)
+	if fatalErr != nil {
+		sendStructErr(ctx, errCh, fmt.Errorf("%s%w", where, fatalErr))
+
+		return ctx.Err() != nil
+	}
+
+	if len(items) == 0 {
+		sendStructErr(ctx, errCh,
+			fmt.Errorf("%sno %s found in file (check earlier errors if this was a JSON array)", where, cfg.collectionLabel))
+
+		return ctx.Err() != nil
+	}
+
+	for i, m := range items {
+		st, err := structFromMap(m, cfg.itemLabel)
+		if err != nil {
+			select {
+			case errCh <- fmt.Errorf("%s%s index %d: %w", where, cfg.itemLabel, i, err):
+			case <-ctx.Done():
+				return true
+			}
+
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return true
+		case outputCh <- cfg.wrap(st):
+		}
+	}
+
+	return false
 }
 
 // structFromMap validates that m has a non-empty top-level "name" and converts

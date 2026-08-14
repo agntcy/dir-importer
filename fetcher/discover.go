@@ -12,6 +12,30 @@ import (
 	"strings"
 )
 
+// jsonPattern matches the files picked up when a file-based fetcher is pointed
+// at a directory instead of a single file.
+const jsonPattern = "*.json"
+
+// inputPaths resolves the path a file-based fetcher was configured with into the
+// list of files it should read.
+//
+// A file yields itself, preserving single-file behaviour exactly. A directory
+// yields its top-level *.json files. A path that cannot be stat'ed is reported
+// as a read failure, matching the error callers produced before directories were
+// supported.
+func inputPaths(ctx context.Context, path string) ([]string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	if !info.IsDir() {
+		return []string{path}, nil
+	}
+
+	return discoverFiles(ctx, path, jsonPattern)
+}
+
 // discoverFiles returns the files directly inside root whose base name matches
 // pattern (as understood by [filepath.Match], e.g. "*.json").
 //
