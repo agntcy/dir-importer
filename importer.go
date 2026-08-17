@@ -68,10 +68,7 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 	// stage.
 	tr := transformer.NewTransformer(cfg.Debug, cfg.Authors, cfg.SchemaVersion)
 
-	d, err := dedup.NewDuplicateChecker(ctx, client, cfg.Type, cfg.Debug, cfg.Force, tr.TransformRecord)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create duplicate checker: %w", err)
-	}
+	d := dedup.NewDuplicateChecker(client, cfg.Type, cfg.Debug, tr.TransformRecord)
 
 	e, err := newEnricher(ctx, cfg.Enricher)
 	if err != nil {

@@ -45,7 +45,7 @@ func TestContentHash_StableAcrossCreatedAtTimeBoundary_RealTranslator(t *testing
 
 	item := types.MCPSourceItem(mcpapiv0.ServerResponse{Server: mcpapiv0.ServerJSON{
 		Name:        "io.github.acme/widget",
-		Version:     "1.0.0",
+		Version:     testVersion,
 		Description: "A widget MCP server",
 		Remotes: []mcpmodel.Transport{
 			{Type: "streamable-http", URL: "https://example.invalid/mcp"},
