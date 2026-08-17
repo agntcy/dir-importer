@@ -68,8 +68,8 @@ func benchRecord(b *testing.B, moduleCount int) *structpb.Struct {
 	return data
 }
 
-// BenchmarkContentHash measures the hash alone, which is the cost buildCache
-// pays per directory record it pulls.
+// BenchmarkContentHash measures the hash alone, which is the cost isDuplicate
+// pays per candidate record it pulls.
 //
 // Run it with: go test ./dedup/ -run '^$' -bench . -benchmem.
 func BenchmarkContentHash(b *testing.B) {
