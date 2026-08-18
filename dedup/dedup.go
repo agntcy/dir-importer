@@ -32,10 +32,9 @@ const (
 // modulesByImportType maps each import type to the module names that scope
 // the per-item duplicate lookup.
 //
-// config.ImportTypeOASF has no entry here by design: a record already in
-// OASF format may carry any module (MCP, A2A, Agent Skill, or none), so
-// findCandidates' "unknown import type" fallback - match any known module -
-// is the correct behavior for it, not an oversight.
+// config.ImportTypeOASF has no entry by design: OASF has no notion of a
+// required module, so findCandidates skips module scoping for it instead of
+// requiring one of the known modules.
 var modulesByImportType = map[config.ImportType][]string{
 	config.ImportTypeMCPRegistry: {moduleMCPCurrent, moduleMCPLegacy},
 	config.ImportTypeMCP:         {moduleMCPCurrent, moduleMCPLegacy},
@@ -200,16 +199,10 @@ func (c *DuplicateChecker) findCandidates(ctx context.Context, name, version str
 		queries = append(queries, &searchv1.RecordQuery{Type: searchv1.RecordQueryType_RECORD_QUERY_TYPE_VERSION, Value: version})
 	}
 
-	modules, ok := modulesByImportType[c.importType]
-	if !ok {
-		// Unknown import type: fall back to matching any known module so that
-		// deduplication is still best-effort rather than silently disabled.
-		for _, m := range modulesByImportType {
-			modules = append(modules, m...)
-		}
-	}
-
-	for _, m := range modules {
+	// No entry (e.g. OASF) means no module filter: RECORD_QUERY_TYPE_MODULE_NAME
+	// only matches records that have a module, which would exclude module-less
+	// ones. isDuplicate's hash comparison still catches false-positive matches.
+	for _, m := range modulesByImportType[c.importType] {
 		queries = append(queries, &searchv1.RecordQuery{Type: searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME, Value: m})
 	}
 
