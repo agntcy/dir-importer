@@ -473,7 +473,38 @@ func TestModulesByImportType_OASFTypeHasNoEntry(t *testing.T) {
 	t.Parallel()
 
 	if _, ok := modulesByImportType[config.ImportTypeOASF]; ok {
-		t.Error("ImportTypeOASF should have no entry in modulesByImportType (relies on the all-modules fallback in findCandidates)")
+		t.Error("ImportTypeOASF should have no entry in modulesByImportType (relies on findCandidates skipping the module filter)")
+	}
+}
+
+// TestIsDuplicate_OASFFindsModuleLessCandidate: a bare OASF record with no
+// module must still be found as a duplicate.
+func TestIsDuplicate_OASFFindsModuleLessCandidate(t *testing.T) {
+	t.Parallel()
+
+	existing := recordWith("bare-agent", testVersion)
+
+	client := &stubClient{
+		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
+			for _, q := range req.GetQueries() {
+				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME {
+					t.Errorf("unexpected module query %q for ImportTypeOASF", q.GetValue())
+				}
+			}
+
+			return newStubStreamResult([]string{cidBafy1}, nil), nil
+		},
+		pullFn: func(_ context.Context, _ []*corev1.RecordRef) ([]*corev1.Record, error) {
+			return []*corev1.Record{existing}, nil
+		},
+	}
+
+	c := NewDuplicateChecker(client, config.ImportTypeOASF, false, testTransform)
+
+	item := types.OASFSourceItem(mustStruct(t, map[string]any{fieldName: "bare-agent", fieldVersion: testVersion}))
+
+	if !c.isDuplicate(context.Background(), item) {
+		t.Fatal("expected a module-less OASF record to still be found as a duplicate")
 	}
 }
 
@@ -699,18 +730,16 @@ func TestFindCandidates_ScopesQueryToImportTypeModules(t *testing.T) {
 	}
 }
 
-func TestFindCandidates_UnknownImportTypeFallsBackToAllModules(t *testing.T) {
+// TestFindCandidates_UnknownImportTypeSkipsModuleFilter: an import type with
+// no modulesByImportType entry must not filter by module at all.
+func TestFindCandidates_UnknownImportTypeSkipsModuleFilter(t *testing.T) {
 	t.Parallel()
 
-	var queriedModules []string
+	var gotQueries []*searchv1.RecordQuery
 
 	client := &stubClient{
 		searchFn: func(_ context.Context, req *searchv1.SearchCIDsRequest) (streaming.StreamResult[searchv1.SearchCIDsResponse], error) {
-			for _, q := range req.GetQueries() {
-				if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME {
-					queriedModules = append(queriedModules, q.GetValue())
-				}
-			}
+			gotQueries = req.GetQueries()
 
 			return newStubStreamResult(nil, nil), nil
 		},
@@ -722,21 +751,9 @@ func TestFindCandidates_UnknownImportTypeFallsBackToAllModules(t *testing.T) {
 		t.Fatalf("findCandidates err = %v", err)
 	}
 
-	wantModules := map[string]bool{
-		moduleMCPCurrent: false, moduleMCPLegacy: false,
-		moduleA2ACurrent: false, moduleA2ALegacy: false,
-		moduleAgentSkillName: false,
-	}
-
-	for _, m := range queriedModules {
-		if _, ok := wantModules[m]; ok {
-			wantModules[m] = true
-		}
-	}
-
-	for m, seen := range wantModules {
-		if !seen {
-			t.Errorf("module %q was not queried in fallback", m)
+	for _, q := range gotQueries {
+		if q.GetType() == searchv1.RecordQueryType_RECORD_QUERY_TYPE_MODULE_NAME {
+			t.Errorf("unexpected module query %q for an import type with no modulesByImportType entry", q.GetValue())
 		}
 	}
 }
