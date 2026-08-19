@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateSkillArchiveFromDirectory_IncludesSupportingFiles(t *testing.T) {
@@ -47,6 +48,71 @@ func TestCreateSkillArchiveFromDirectory_IncludesSupportingFiles(t *testing.T) {
 
 	if !containsPath(paths, "SKILL.md") || !containsPath(paths, "references/extra.md") {
 		t.Fatalf("unexpected archive paths: %v", paths)
+	}
+}
+
+func TestCreateSkillArchiveFromDirectory_DeterministicAcrossMtimes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "mtime-skill")
+
+	refDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	md := "---\nname: mtime-skill\ndescription: Deterministic archive test.\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(md), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(refDir, "extra.md"), []byte("# Extra\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := CreateSkillArchiveFromDirectory(skillDir)
+	if err != nil {
+		t.Fatalf("first CreateSkillArchiveFromDirectory: %v", err)
+	}
+
+	oldTime := time.Date(2019, 3, 14, 15, 9, 26, 0, time.UTC)
+	newTime := time.Date(2024, 7, 4, 12, 0, 0, 0, time.UTC)
+
+	for _, path := range []string{
+		filepath.Join(skillDir, "SKILL.md"),
+		filepath.Join(refDir, "extra.md"),
+	} {
+		if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+			t.Fatalf("Chtimes old %q: %v", path, err)
+		}
+	}
+
+	second, err := CreateSkillArchiveFromDirectory(skillDir)
+	if err != nil {
+		t.Fatalf("second CreateSkillArchiveFromDirectory: %v", err)
+	}
+
+	if !bytes.Equal(first, second) {
+		t.Fatal("archive bytes changed after setting old mtimes")
+	}
+
+	for _, path := range []string{
+		filepath.Join(skillDir, "SKILL.md"),
+		filepath.Join(refDir, "extra.md"),
+	} {
+		if err := os.Chtimes(path, newTime, newTime); err != nil {
+			t.Fatalf("Chtimes new %q: %v", path, err)
+		}
+	}
+
+	third, err := CreateSkillArchiveFromDirectory(skillDir)
+	if err != nil {
+		t.Fatalf("third CreateSkillArchiveFromDirectory: %v", err)
+	}
+
+	if !bytes.Equal(first, third) {
+		t.Fatal("archive bytes changed after setting new mtimes")
 	}
 }
 

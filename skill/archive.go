@@ -24,6 +24,9 @@ const (
 	archiveFileMode           = 0o600            // Unix-style permission (read/write by owner)
 )
 
+// archiveModTime is a fixed timestamp so archives hash identically regardless of filesystem mtimes.
+var archiveModTime = time.Unix(0, 0)
+
 type skillArchive struct {
 	root              string
 	files             []skillArchiveFile
@@ -34,7 +37,6 @@ type skillArchiveFile struct {
 	relPath string
 	absPath string
 	size    int64
-	modTime time.Time
 }
 
 // CreateSkillArchiveFromDirectory builds a .gzip of all regular files under skillDir.
@@ -118,7 +120,6 @@ func (c *skillArchive) visit(walkPath string, d fs.DirEntry, err error) error {
 		relPath: rel,
 		absPath: walkPath,
 		size:    info.Size(),
-		modTime: info.ModTime(),
 	})
 
 	if len(c.files) > maxArchiveFiles {
@@ -140,7 +141,7 @@ func encodeSkillArchive(files []skillArchiveFile) ([]byte, error) {
 			Name:    f.relPath,
 			Mode:    archiveFileMode,
 			Size:    f.size,
-			ModTime: f.modTime,
+			ModTime: archiveModTime,
 		}
 
 		if err := tw.WriteHeader(header); err != nil {
