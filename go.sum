@@ -1,7 +1,7 @@
 buf.build/gen/go/agntcy/oasf-sdk/protocolbuffers/go v1.36.11-20260714100340-94ed518b08ce.1 h1:31lxoxvWpr9NxQss45jJOv+kDzDXOO2zj6ZSW29KV10=
 buf.build/gen/go/agntcy/oasf-sdk/protocolbuffers/go v1.36.11-20260714100340-94ed518b08ce.1/go.mod h1:EEQp9sY+88ieMjKf9W4Uf9t3X6qV1nHY0DcGOxsMlac=
-buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260721113505-cf7db8888586.1 h1:Kgct/4Z/6nueblBepvpwo1UwV4+lxOfgEW4BoZEDjlM=
-buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260721113505-cf7db8888586.1/go.mod h1:fFU895SO7wQQGKQjtcNazRJgE8pigwfwTLmf4W2gRsk=
+buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260831083722-3438c6a1c7eb.2 h1:hcbJnwat7AO2LWs0zQGXZlnSgl7u2nnZSs/mkUAjqE8=
+buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260831083722-3438c6a1c7eb.2/go.mod h1:fFU895SO7wQQGKQjtcNazRJgE8pigwfwTLmf4W2gRsk=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260709200747-435963d16310.1 h1:fXh8CsdNpjRr8R5vFdqtIxPt/Lno2IIJlYOdZBIZn0w=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260709200747-435963d16310.1/go.mod h1:tvtbpgaVXZX4g6Pn+AnzFycuRK3MOz5HJfEGeEllXYM=
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
