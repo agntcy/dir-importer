@@ -6,17 +6,18 @@ package fetcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/agntcy/dir-importer/types"
 	"github.com/miekg/dns"
 	"google.golang.org/protobuf/types/known/structpb"
-
-	"github.com/agntcy/dir-importer/types"
 )
 
 // A2ADNSFetcherConfig configures the DNS-based A2A agent card fetcher.
@@ -43,7 +44,8 @@ func (c A2ADNSFetcherConfig) concurrencyLimit() int {
 	if c.Concurrency > 0 {
 		return c.Concurrency
 	}
-	return 10
+
+	return 10 //nolint:mnd // default goroutine cap
 }
 
 type a2aDNSFetcher struct {
@@ -57,15 +59,19 @@ func NewA2ADNSFetcher(cfg A2ADNSFetcherConfig) (*a2aDNSFetcher, error) {
 	if len(cfg.Domains) == 0 {
 		return nil, fmt.Errorf("no domains provided")
 	}
+
 	if cfg.SVCBLookup == nil {
 		cfg.SVCBLookup = defaultSVCBLookup
 	}
+
 	if cfg.TXTLookup == nil {
 		cfg.TXTLookup = defaultTXTLookup
 	}
+
 	if cfg.Client == nil {
 		cfg.Client = http.DefaultClient
 	}
+
 	return &a2aDNSFetcher{cfg: cfg}, nil
 }
 
@@ -77,6 +83,7 @@ func (f *a2aDNSFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-c
 
 	go func() {
 		sem := make(chan struct{}, f.cfg.concurrencyLimit())
+
 		var wg sync.WaitGroup
 
 		defer func() {
@@ -93,10 +100,14 @@ func (f *a2aDNSFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-c
 			}
 
 			wg.Add(1)
+
 			go func(d string) {
 				defer wg.Done()
+
 				sem <- struct{}{}
+
 				defer func() { <-sem }()
+
 				f.fetchDomain(ctx, d, itemCh, errCh)
 			}(domain)
 		}
@@ -105,20 +116,26 @@ func (f *a2aDNSFetcher) Fetch(ctx context.Context) (<-chan types.SourceItem, <-c
 	return itemCh, errCh
 }
 
+// sendErr delivers err to errCh, abandoning the send if ctx is cancelled.
+func sendErr(ctx context.Context, errCh chan<- error, err error) {
+	select {
+	case errCh <- err:
+	case <-ctx.Done():
+	}
+}
+
 func (f *a2aDNSFetcher) fetchDomain(ctx context.Context, domain string, itemCh chan<- types.SourceItem, errCh chan<- error) {
 	// Phase 1: SVCB query (primary path per DNS-AID).
 	rrs, err := f.cfg.SVCBLookup(ctx, domain)
 	if err != nil {
-		dnsErr, ok := err.(*net.DNSError)
-		if ok && dnsErr.IsNotFound {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			// NXDOMAIN or NODATA: this domain has no SVCB record, try TXT.
 			goto txtFallback
 		}
 		// Real network failure: surface it and stop — TXT would likely fail too.
-		select {
-		case errCh <- fmt.Errorf("SVCB lookup for %s: %w", domain, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("SVCB lookup for %s: %w", domain, err))
+
 		return
 	}
 
@@ -127,15 +144,19 @@ func (f *a2aDNSFetcher) fetchDomain(ctx context.Context, domain string, itemCh c
 		if !ok {
 			continue
 		}
+
 		if !svcbHasA2A(svcb) {
 			continue
 		}
+
 		host := resolveTarget(svcb.Target, domain)
 		if !strings.Contains(host, "://") {
 			host = "https://" + host
 		}
+
 		cardURL := buildCardURL(host)
 		f.fetchAndEmit(ctx, cardURL, itemCh, errCh)
+
 		return // SVCB path attempted (success or error already sent)
 	}
 	// SVCB present but no a2a alpn: fall through to TXT.
@@ -143,15 +164,15 @@ func (f *a2aDNSFetcher) fetchDomain(ctx context.Context, domain string, itemCh c
 txtFallback:
 	// Phase 2: _ans.<domain> TXT fallback.
 	txts, err := f.cfg.TXTLookup(ctx, "_ans."+domain)
+
 	if err != nil {
-		dnsErr, ok := err.(*net.DNSError)
-		if ok && dnsErr.IsNotFound {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 			return // Not an ANS-registered agent.
 		}
-		select {
-		case errCh <- fmt.Errorf("TXT lookup for _ans.%s: %w", domain, err):
-		case <-ctx.Done():
-		}
+
+		sendErr(ctx, errCh, fmt.Errorf("TXT lookup for _ans.%s: %w", domain, err))
+
 		return
 	}
 
@@ -159,19 +180,21 @@ txtFallback:
 		if !strings.HasPrefix(txt, "v=ans1") {
 			continue
 		}
+
 		kv := parseKV(txt)
 		if !containsA2A(strings.Split(kv["p"], ",")) {
 			continue
 		}
+
 		rawURL := kv["url"]
 		if rawURL == "" {
-			select {
-			case errCh <- fmt.Errorf("_ans.%s: record has no url= field", domain):
-			case <-ctx.Done():
-			}
+			sendErr(ctx, errCh, fmt.Errorf("_ans.%s: record has no url= field", domain))
+
 			return
 		}
+
 		f.fetchAndEmit(ctx, buildCardURL(rawURL), itemCh, errCh)
+
 		return
 	}
 }
@@ -181,55 +204,44 @@ txtFallback:
 func (f *a2aDNSFetcher) fetchAndEmit(ctx context.Context, cardURL string, itemCh chan<- types.SourceItem, errCh chan<- error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cardURL, nil)
 	if err != nil {
-		select {
-		case errCh <- fmt.Errorf("build request for %s: %w", cardURL, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("build request for %s: %w", cardURL, err))
+
 		return
 	}
 
-	resp, err := f.cfg.Client.Do(req)
+	resp, err := f.cfg.Client.Do(req) //nolint:gosec // target URL derived from operator-configured domains
 	if err != nil {
-		select {
-		case errCh <- fmt.Errorf("fetch %s: %w", cardURL, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("fetch %s: %w", cardURL, err))
+
 		return
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		select {
-		case errCh <- fmt.Errorf("fetch %s: HTTP %d", cardURL, resp.StatusCode):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("fetch %s: HTTP %d", cardURL, resp.StatusCode))
+
 		return
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		select {
-		case errCh <- fmt.Errorf("read body from %s: %w", cardURL, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("read body from %s: %w", cardURL, err))
+
 		return
 	}
 
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
-		select {
-		case errCh <- fmt.Errorf("decode JSON from %s: %w", cardURL, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("decode JSON from %s: %w", cardURL, err))
+
 		return
 	}
 
 	s, err := structpb.NewStruct(m)
 	if err != nil {
-		select {
-		case errCh <- fmt.Errorf("proto-encode card from %s: %w", cardURL, err):
-		case <-ctx.Done():
-		}
+		sendErr(ctx, errCh, fmt.Errorf("proto-encode card from %s: %w", cardURL, err))
+
 		return
 	}
 
@@ -246,12 +258,12 @@ func svcbHasA2A(svcb *dns.SVCB) bool {
 		if !ok {
 			continue
 		}
-		for _, v := range alpn.Alpn {
-			if v == "a2a" {
-				return true
-			}
+
+		if slices.Contains(alpn.Alpn, "a2a") {
+			return true
 		}
 	}
+
 	return false
 }
 
@@ -262,6 +274,7 @@ func resolveTarget(target, domain string) string {
 	if t == "" || t == domain {
 		return domain
 	}
+
 	return t
 }
 
@@ -272,6 +285,7 @@ func buildCardURL(base string) string {
 	if strings.HasSuffix(u, "/agent-card.json") {
 		return u
 	}
+
 	return u + "/.well-known/agent-card.json"
 }
 
@@ -279,16 +293,20 @@ func buildCardURL(base string) string {
 // and surrounding double-quotes from each value.
 func parseKV(s string) map[string]string {
 	m := make(map[string]string)
-	for _, part := range strings.Split(s, ";") {
+
+	for part := range strings.SplitSeq(s, ";") {
 		part = strings.TrimSpace(part)
-		idx := strings.IndexByte(part, '=')
-		if idx < 0 {
+
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
 			continue
 		}
-		k := strings.TrimSpace(part[:idx])
-		v := strings.Trim(strings.TrimSpace(part[idx+1:]), `"`)
+
+		k = strings.TrimSpace(k)
+		v = strings.Trim(strings.TrimSpace(v), `"`)
 		m[k] = v
 	}
+
 	return m
 }
 
@@ -299,6 +317,7 @@ func containsA2A(protocols []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -315,14 +334,16 @@ func defaultSVCBLookup(ctx context.Context, domain string) ([]dns.RR, error) {
 	m.RecursionDesired = true
 
 	server := fmt.Sprintf("%s:%s", conf.Servers[0], conf.Port)
+
 	r, _, err := c.ExchangeContext(ctx, m, server)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // DNS error types come from net/miekg; caller wraps with domain context
 	}
 
 	if r.Rcode == dns.RcodeNameError {
 		return nil, &net.DNSError{Name: domain, IsNotFound: true}
 	}
+
 	if r.Rcode != dns.RcodeSuccess || len(r.Answer) == 0 {
 		return nil, &net.DNSError{Name: domain, IsNotFound: true}
 	}
@@ -332,5 +353,5 @@ func defaultSVCBLookup(ctx context.Context, domain string) ([]dns.RR, error) {
 
 // defaultTXTLookup uses net.DefaultResolver to look up TXT records.
 func defaultTXTLookup(ctx context.Context, name string) ([]string, error) {
-	return net.DefaultResolver.LookupTXT(ctx, name)
+	return net.DefaultResolver.LookupTXT(ctx, name) //nolint:wrapcheck // DNS error types come from net package; caller wraps with domain context
 }
