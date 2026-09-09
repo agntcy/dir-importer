@@ -8,8 +8,10 @@ require (
 	github.com/agntcy/dir/client v1.7.1
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
 	github.com/mark3labs/mcp-go v0.58.0
+	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/registry v1.8.1
 	github.com/sashabaranov/go-openai v1.42.1
+	github.com/stretchr/testify v1.12.1
 	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
@@ -23,7 +25,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ipfs/go-cid v0.6.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
-	github.com/miekg/dns v1.1.73 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
