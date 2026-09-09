@@ -15,6 +15,7 @@ require (
 )
 
 require (
+	github.com/miekg/dns v1.1.73 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
