@@ -131,6 +131,9 @@ func (f *a2aDNSFetcher) fetchDomain(ctx context.Context, domain string, itemCh c
 			continue
 		}
 		host := resolveTarget(svcb.Target, domain)
+		if !strings.Contains(host, "://") {
+			host = "https://" + host
+		}
 		cardURL := buildCardURL(host)
 		f.fetchAndEmit(ctx, cardURL, itemCh, errCh)
 		return // SVCB path attempted (success or error already sent)

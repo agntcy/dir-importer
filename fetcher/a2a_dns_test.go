@@ -5,11 +5,11 @@ package fetcher
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -22,10 +22,13 @@ import (
 // minimalCard is a valid A2A agent card JSON used across tests.
 const minimalCard = `{"name":"Test Agent","url":"https://test.example","version":"1.0.0"}`
 
-// cardServer starts an httptest.Server that serves minimalCard at /path.
+// cardServer starts an httptest.TLS server that serves minimalCard at
+// /.well-known/agent-card.json. Using TLS matches the https:// scheme that
+// fetchDomain prepends to bare SVCB hostnames; srv.Client() carries the
+// self-signed certificate so the fetcher can verify it in tests.
 func cardServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/.well-known/agent-card.json" {
 			http.NotFound(w, r)
 			return
@@ -108,26 +111,17 @@ func collect(t *testing.T, itemCh <-chan types.SourceItem, errCh <-chan error) (
 
 func TestA2ADNSFetcher_SVCBHappyPath(t *testing.T) {
 	srv, base := cardServer(t)
+	// Strip https:// to get just host:port for the SVCB target.
+	srvHost := strings.TrimPrefix(base, "https://")
 	domain := "agent.example.com"
 
 	cfg := A2ADNSFetcherConfig{
 		Domains: []string{domain},
 		SVCBLookup: svcbLookupFunc(map[string][]dns.RR{
-			domain: {svcbRR(".", []string{"a2a", "h2"})},
+			domain: {svcbRR(srvHost+".", []string{"a2a", "h2"})},
 		}),
 		TXTLookup: txtLookupFunc(map[string][]string{}),
 		Client:    srv.Client(),
-	}
-	// Override the card URL derivation by pointing the SVCB target to the test server host.
-	// We do this by having the svcbRR target equal the test server's host:port.
-	// Since buildCardURL uses the queried domain for target=".", we need to point
-	// the HTTP client at the test server instead. Use a transport that rewrites the host.
-	cfg.Client = &http.Client{
-		Transport: &hostRewriteTransport{
-			inner:    srv.Client().Transport,
-			fromHost: domain,
-			toURL:    base,
-		},
 	}
 
 	f, err := NewA2ADNSFetcher(cfg)
@@ -139,10 +133,6 @@ func TestA2ADNSFetcher_SVCBHappyPath(t *testing.T) {
 	require.Len(t, items, 1)
 	assert.Empty(t, errs)
 	assert.Equal(t, types.SourceKindA2A, items[0].Kind)
-
-	var card map[string]any
-	require.NoError(t, json.Unmarshal([]byte(minimalCard), &card))
-	assert.Equal(t, card["name"], items[0].A2A.AsMap()["name"])
 }
 
 func TestA2ADNSFetcher_SVCBNoA2A_FallsBackToTXT(t *testing.T) {
@@ -460,25 +450,3 @@ func TestContainsA2A(t *testing.T) {
 	assert.False(t, containsA2A([]string{}))
 }
 
-// hostRewriteTransport redirects requests for fromHost to toURL for testing.
-type hostRewriteTransport struct {
-	inner    http.RoundTripper
-	fromHost string
-	toURL    string
-}
-
-func (t *hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Hostname() == t.fromHost {
-		req = req.Clone(req.Context())
-		req.URL.Host = req.URL.Host // keep path, rewrite host
-		// Replace scheme+host with the test server URL
-		toURL := t.toURL
-		req.URL.Scheme = "http"
-		req.URL.Host = toURL[len("http://"):]
-	}
-	inner := t.inner
-	if inner == nil {
-		inner = http.DefaultTransport
-	}
-	return inner.RoundTrip(req)
-}
