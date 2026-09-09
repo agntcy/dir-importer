@@ -12,15 +12,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/agntcy/dir-importer/types"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/agntcy/dir-importer/types"
 )
 
 // minimalCard is a valid A2A agent card JSON used across tests.
 const minimalCard = `{"name":"Test Agent","url":"https://test.example","version":"1.0.0"}`
+
+// testDomain is the default agent FQDN used across unit tests.
+const testDomain = "agent.example.com"
 
 // cardServer starts an httptest.TLS server that serves minimalCard at
 // /.well-known/agent-card.json. Using TLS matches the https:// scheme that
@@ -28,15 +30,19 @@ const minimalCard = `{"name":"Test Agent","url":"https://test.example","version"
 // self-signed certificate so the fetcher can verify it in tests.
 func cardServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
+
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/.well-known/agent-card.json" {
 			http.NotFound(w, r)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, minimalCard)
 	}))
 	t.Cleanup(srv.Close)
+
 	return srv, srv.URL
 }
 
@@ -48,6 +54,7 @@ func svcbRR(target string, alpns []string) *dns.SVCB {
 		Target:   target,
 		Value:    []dns.SVCBKeyValue{&dns.SVCBAlpn{Alpn: alpns}},
 	}
+
 	return rr
 }
 
@@ -59,9 +66,11 @@ func txtLookupFunc(m map[string][]string) func(ctx context.Context, name string)
 		if !ok {
 			return nil, &net.DNSError{Name: name, IsNotFound: true}
 		}
+
 		if len(v) == 1 && v[0] == "ERROR" {
 			return nil, &net.DNSError{Name: name, IsTimeout: true}
 		}
+
 		return v, nil
 	}
 }
@@ -74,11 +83,13 @@ func svcbLookupFunc(m map[string][]dns.RR) func(ctx context.Context, domain stri
 		if !ok {
 			return nil, &net.DNSError{Name: domain, IsNotFound: true}
 		}
+
 		if len(rrs) == 1 {
 			if _, isErr := rrs[0].(*dns.MX); isErr { // use MX as sentinel for "ERROR"
 				return nil, &net.DNSError{Name: domain, IsTimeout: true}
 			}
 		}
+
 		return rrs, nil
 	}
 }
@@ -86,24 +97,33 @@ func svcbLookupFunc(m map[string][]dns.RR) func(ctx context.Context, domain stri
 // collect drains itemCh and errCh into slices.
 func collect(t *testing.T, itemCh <-chan types.SourceItem, errCh <-chan error) ([]types.SourceItem, []error) {
 	t.Helper()
-	var items []types.SourceItem
-	var errs []error
+
+	var (
+		items []types.SourceItem
+		errs  []error
+	)
+
 	for itemCh != nil || errCh != nil {
 		select {
 		case item, ok := <-itemCh:
 			if !ok {
 				itemCh = nil
+
 				continue
 			}
+
 			items = append(items, item)
 		case err, ok := <-errCh:
 			if !ok {
 				errCh = nil
+
 				continue
 			}
+
 			errs = append(errs, err)
 		}
 	}
+
 	return items, errs
 }
 
@@ -113,7 +133,7 @@ func TestA2ADNSFetcher_SVCBHappyPath(t *testing.T) {
 	srv, base := cardServer(t)
 	// Strip https:// to get just host:port for the SVCB target.
 	srvHost := strings.TrimPrefix(base, "https://")
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains: []string{domain},
@@ -137,7 +157,7 @@ func TestA2ADNSFetcher_SVCBHappyPath(t *testing.T) {
 
 func TestA2ADNSFetcher_SVCBNoA2A_FallsBackToTXT(t *testing.T) {
 	srv, base := cardServer(t)
-	domain := "agent.example.com"
+	domain := testDomain
 	_ = base
 
 	cfg := A2ADNSFetcherConfig{
@@ -164,7 +184,7 @@ func TestA2ADNSFetcher_SVCBNoA2A_FallsBackToTXT(t *testing.T) {
 
 func TestA2ADNSFetcher_SVCBNoDomain_FallsBackToTXT(t *testing.T) {
 	srv, base := cardServer(t)
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -186,7 +206,7 @@ func TestA2ADNSFetcher_SVCBNoDomain_FallsBackToTXT(t *testing.T) {
 }
 
 func TestA2ADNSFetcher_SVCBNetworkError_NoTXTFallback(t *testing.T) {
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains: []string{domain},
@@ -211,7 +231,7 @@ func TestA2ADNSFetcher_SVCBNetworkError_NoTXTFallback(t *testing.T) {
 }
 
 func TestA2ADNSFetcher_NeitherRecord(t *testing.T) {
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -255,7 +275,7 @@ func TestA2ADNSFetcher_MultiDomain(t *testing.T) {
 
 func TestA2ADNSFetcher_TXTMultiProtocol_A2AComma(t *testing.T) {
 	srv, base := cardServer(t)
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -277,7 +297,7 @@ func TestA2ADNSFetcher_TXTMultiProtocol_A2AComma(t *testing.T) {
 }
 
 func TestA2ADNSFetcher_TXTMCPOnly(t *testing.T) {
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -298,7 +318,7 @@ func TestA2ADNSFetcher_TXTMCPOnly(t *testing.T) {
 }
 
 func TestA2ADNSFetcher_TXTMissingURL(t *testing.T) {
-	domain := "agent.example.com"
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -324,7 +344,8 @@ func TestA2ADNSFetcher_HTTP404(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	domain := "agent.example.com"
+
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -351,7 +372,8 @@ func TestA2ADNSFetcher_MalformedJSON(t *testing.T) {
 		fmt.Fprint(w, `{invalid json`)
 	}))
 	defer srv.Close()
-	domain := "agent.example.com"
+
+	domain := testDomain
 
 	cfg := A2ADNSFetcherConfig{
 		Domains:    []string{domain},
@@ -374,7 +396,7 @@ func TestA2ADNSFetcher_MalformedJSON(t *testing.T) {
 
 func TestA2ADNSFetcher_URLAlreadyHasCardPath(t *testing.T) {
 	srv, base := cardServer(t)
-	domain := "agent.example.com"
+	domain := testDomain
 	cardURL := base + "/.well-known/agent-card.json"
 
 	cfg := A2ADNSFetcherConfig{
@@ -397,7 +419,7 @@ func TestA2ADNSFetcher_URLAlreadyHasCardPath(t *testing.T) {
 }
 
 func TestA2ADNSFetcher_ContextCancelled(t *testing.T) {
-	domain := "agent.example.com"
+	domain := testDomain
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
@@ -449,4 +471,3 @@ func TestContainsA2A(t *testing.T) {
 	assert.False(t, containsA2A([]string{"mcp"}))
 	assert.False(t, containsA2A([]string{}))
 }
-
