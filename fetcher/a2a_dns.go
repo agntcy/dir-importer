@@ -20,6 +20,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	protoA2A = "a2a"
+	protoMCP = "mcp"
+)
+
 // A2ADNSFetcherConfig configures the DNS-based A2A agent card fetcher.
 // SVCBLookup and TXTLookup are injectable for testing; nil values use live DNS.
 type A2ADNSFetcherConfig struct {
@@ -259,7 +264,7 @@ func svcbHasA2A(svcb *dns.SVCB) bool {
 			continue
 		}
 
-		if slices.Contains(alpn.Alpn, "a2a") {
+		if slices.Contains(alpn.Alpn, protoA2A) {
 			return true
 		}
 	}
@@ -313,7 +318,7 @@ func parseKV(s string) map[string]string {
 // containsA2A reports whether "a2a" appears in protocols (after trimming spaces).
 func containsA2A(protocols []string) bool {
 	for _, p := range protocols {
-		if strings.TrimSpace(p) == "a2a" {
+		if strings.TrimSpace(p) == protoA2A {
 			return true
 		}
 	}

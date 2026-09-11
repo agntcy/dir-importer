@@ -138,7 +138,7 @@ func TestA2ADNSFetcher_SVCBHappyPath(t *testing.T) {
 	cfg := A2ADNSFetcherConfig{
 		Domains: []string{domain},
 		SVCBLookup: svcbLookupFunc(map[string][]dns.RR{
-			domain: {svcbRR(srvHost+".", []string{"a2a", "h2"})},
+			domain: {svcbRR(srvHost+".", []string{protoA2A, "h2"})},
 		}),
 		TXTLookup: txtLookupFunc(map[string][]string{}),
 		Client:    srv.Client(),
@@ -460,14 +460,14 @@ func TestParseKV(t *testing.T) {
 	kv := parseKV("v=ans1; version=v1.0.9; p=a2a; mode=direct; url=https://agent.webmesh.ai")
 	assert.Equal(t, "ans1", kv["v"])
 	assert.Equal(t, "v1.0.9", kv["version"])
-	assert.Equal(t, "a2a", kv["p"])
+	assert.Equal(t, protoA2A, kv["p"])
 	assert.Equal(t, "https://agent.webmesh.ai", kv["url"])
 }
 
 func TestContainsA2A(t *testing.T) {
-	assert.True(t, containsA2A([]string{"a2a"}))
-	assert.True(t, containsA2A([]string{"a2a", "mcp"}))
-	assert.True(t, containsA2A([]string{"mcp", " a2a "}))
-	assert.False(t, containsA2A([]string{"mcp"}))
+	assert.True(t, containsA2A([]string{protoA2A}))
+	assert.True(t, containsA2A([]string{protoA2A, protoMCP}))
+	assert.True(t, containsA2A([]string{protoMCP, " a2a "}))
+	assert.False(t, containsA2A([]string{protoMCP}))
 	assert.False(t, containsA2A([]string{}))
 }
