@@ -8,14 +8,18 @@ require (
 	github.com/agntcy/dir/client v1.7.0
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
 	github.com/mark3labs/mcp-go v0.58.0
+	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/registry v1.8.1
 	github.com/sashabaranov/go-openai v1.42.0
+	github.com/stretchr/testify v1.11.1
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 )

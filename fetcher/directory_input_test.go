@@ -272,14 +272,14 @@ func TestFileFetchers_DirectoryUnreadableFile(t *testing.T) {
 		drain    func(<-chan types.SourceItem, <-chan error) ([]types.SourceItem, []error)
 	}{
 		{
-			name:     "a2a",
+			name:     protoA2A,
 			good:     `{"name":"readable","version":"1.0.0"}`,
 			locked:   `{"name":"unreadable","version":"1.0.0"}`,
 			newFetch: func(p string) (types.Fetcher, error) { return NewA2AFileFetcher(p) },
 			drain:    drainA2AFetch,
 		},
 		{
-			name:     "mcp",
+			name:     protoMCP,
 			good:     `{"name":"io.example/readable","version":"1.0.0"}`,
 			locked:   `{"name":"io.example/unreadable","version":"1.0.0"}`,
 			newFetch: func(p string) (types.Fetcher, error) { return NewMCPFileFetcher(p) },
