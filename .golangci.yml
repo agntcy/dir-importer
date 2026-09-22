@@ -6,11 +6,13 @@ linters:
     - embeddedstructfieldcheck
     - err113
     - exhaustruct
+    - exhaustruct_v5
     - funcorder
     - funlen
     - godoclint
     - gochecknoglobals
     - gochecknoinits
+    - goconst
     - godox
     - gomoddirectives
     - inamedparam
