@@ -56,17 +56,19 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 			return
 		}
 
-		skillDirs, err := skill.DiscoverSkillDirectories(ctx, f.path)
+		skillSet, err := skill.OpenSkillDirectories(ctx, f.path)
 		if err != nil {
 			sendError(ctx, errCh, err)
 
 			return
 		}
+		defer skillSet.Close()
 
+		skillDirs := skillSet.Paths()
 		var emitted int
 
-		for _, skillDir := range skillDirs {
-			st, err := skill.ParseSkillDirectoryForImport(skillDir)
+		for i, skillDir := range skillDirs {
+			st, err := skillSet.ParseForImport(i)
 			if err != nil {
 				sendError(ctx, errCh, fmt.Errorf("%s: %w", skillDir, err))
 

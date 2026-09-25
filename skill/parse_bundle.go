@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/fs"
-	"path/filepath"
+	"os"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -16,16 +16,33 @@ import (
 // contains only SKILL.md, the payload omits skillArchive (markdown record). When it
 // contains additional files, a .gzip bundle is built and skillArchive is set.
 func ParseSkillDirectoryForImport(skillDir string) (*structpb.Struct, error) {
-	isBundle, err := isSkillBundle(skillDir)
+	root, err := openSkillRoot(skillDir)
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 
-	if isBundle {
-		return ParseSkillDirectoryBundle(skillDir)
+	return parseSkillRootForImport(root, root.Name())
+}
+
+func parseSkillRootForImport(root *os.Root, displayPath string) (*structpb.Struct, error) {
+	isBundle, err := isSkillBundleRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if !isBundle {
+		return parseSkillRoot(root, displayPath)
 	}
 
-	return ParseSkillDirectory(skillDir)
+	st, err := parseSkillRoot(root, displayPath)
+	if err != nil {
+		return nil, err
+	}
+	archive, err := createSkillArchiveFromRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("create skill archive: %w", err)
+	}
+	return withSkillArchive(st, archive)
 }
 
 // ParseSkillDirectoryBundle reads skillDir, builds a .gzip archive of its files, and returns
@@ -33,16 +50,20 @@ func ParseSkillDirectoryForImport(skillDir string) (*structpb.Struct, error) {
 //   - skillMarkdown: full SKILL.md content (required)
 //   - skillArchive: base64-encoded .gzip bytes (required)
 func ParseSkillDirectoryBundle(skillDir string) (*structpb.Struct, error) {
-	st, err := ParseSkillDirectory(skillDir)
+	root, err := openSkillRoot(skillDir)
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 
-	archive, err := CreateSkillArchiveFromDirectory(skillDir)
+	st, err := parseSkillRoot(root, root.Name())
+	if err != nil {
+		return nil, err
+	}
+	archive, err := createSkillArchiveFromRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("create skill archive: %w", err)
 	}
-
 	return withSkillArchive(st, archive)
 }
 
@@ -62,52 +83,23 @@ func withSkillArchive(st *structpb.Struct, archive []byte) (*structpb.Struct, er
 	return out, nil
 }
 
-func isSkillBundle(skillDir string) (bool, error) {
-	root, err := resolveSearchRoot(skillDir)
-	if err != nil {
-		return false, err
-	}
-
+func isSkillBundleRoot(root *os.Root) (bool, error) {
 	var hasExtra bool
-
-	walkErr := filepath.WalkDir(root, func(walkPath string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(root.FS(), ".", func(walkPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if d.IsDir() {
+		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
-
-		if !d.Type().IsRegular() {
-			return nil
-		}
-
-		within, err := isPathWithinRoot(root, walkPath)
-		if err != nil {
-			return err
-		}
-
-		if !within {
-			return nil
-		}
-
-		rel, err := filepath.Rel(root, walkPath)
-		if err != nil {
-			return fmt.Errorf("rel path for %s: %w", walkPath, err)
-		}
-
-		if normalizeArchiveEntryPath(rel) != skillFileName {
+		if normalizeArchiveEntryPath(walkPath) != skillFileName {
 			hasExtra = true
-
 			return fs.SkipAll
 		}
-
 		return nil
 	})
 	if walkErr != nil {
 		return false, fmt.Errorf("walk skill directory: %w", walkErr)
 	}
-
 	return hasExtra, nil
 }
