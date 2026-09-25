@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -28,37 +27,50 @@ const (
 var archiveModTime = time.Unix(0, 0)
 
 type skillArchive struct {
-	root              string
 	files             []skillArchiveFile
 	uncompressedTotal int64
 }
 
 type skillArchiveFile struct {
 	relPath string
-	absPath string
 	size    int64
 }
 
 // CreateSkillArchiveFromDirectory builds a .gzip of all regular files under skillDir.
 // Paths inside the archive are relative to skillDir using forward slashes.
 func CreateSkillArchiveFromDirectory(skillDir string) ([]byte, error) {
-	root, err := resolveSearchRoot(skillDir)
+	root, err := openSkillRoot(skillDir)
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
+	return createSkillArchiveFromRoot(root)
+}
 
+func openSkillRoot(skillDir string) (*os.Root, error) {
+	resolved, err := resolveSearchRoot(skillDir)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("open skill directory: %w", err)
+	}
+	return root, nil
+}
+
+func createSkillArchiveFromRoot(root *os.Root) ([]byte, error) {
 	files, err := collectArchiveFiles(root)
 	if err != nil {
 		return nil, err
 	}
-
-	return encodeSkillArchive(files)
+	return encodeSkillArchive(root, files)
 }
 
-func collectArchiveFiles(root string) ([]skillArchiveFile, error) {
-	collector := &skillArchive{root: root}
+func collectArchiveFiles(root *os.Root) ([]skillArchiveFile, error) {
+	collector := &skillArchive{}
 
-	walkErr := filepath.WalkDir(root, collector.visit)
+	walkErr := fs.WalkDir(root.FS(), ".", collector.visit)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walk skill directory: %w", walkErr)
 	}
@@ -83,15 +95,6 @@ func (c *skillArchive) visit(walkPath string, d fs.DirEntry, err error) error {
 		return nil
 	}
 
-	within, err := isPathWithinRoot(c.root, walkPath)
-	if err != nil {
-		return err
-	}
-
-	if !within {
-		return nil
-	}
-
 	info, err := d.Info()
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", walkPath, err)
@@ -106,19 +109,13 @@ func (c *skillArchive) visit(walkPath string, d fs.DirEntry, err error) error {
 		return fmt.Errorf("skill directory exceeds %d byte uncompressed limit", maxArchiveUncompressedLen)
 	}
 
-	rel, err := filepath.Rel(c.root, walkPath)
-	if err != nil {
-		return fmt.Errorf("rel path for %s: %w", walkPath, err)
-	}
-
-	rel = normalizeArchiveEntryPath(rel)
+	rel := normalizeArchiveEntryPath(walkPath)
 	if rel == "" {
 		return nil
 	}
 
 	c.files = append(c.files, skillArchiveFile{
 		relPath: rel,
-		absPath: walkPath,
 		size:    info.Size(),
 	})
 
@@ -129,7 +126,7 @@ func (c *skillArchive) visit(walkPath string, d fs.DirEntry, err error) error {
 	return nil
 }
 
-func encodeSkillArchive(files []skillArchiveFile) ([]byte, error) {
+func encodeSkillArchive(root *os.Root, files []skillArchiveFile) ([]byte, error) {
 	var buf bytes.Buffer
 
 	gzw := gzip.NewWriter(&buf)
@@ -148,7 +145,7 @@ func encodeSkillArchive(files []skillArchiveFile) ([]byte, error) {
 			return nil, fmt.Errorf("write tar header for %q: %w", f.relPath, err)
 		}
 
-		payload, err := os.ReadFile(f.absPath)
+		payload, err := root.ReadFile(f.relPath)
 		if err != nil {
 			return nil, fmt.Errorf("read %q: %w", f.relPath, err)
 		}
