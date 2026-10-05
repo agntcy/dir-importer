@@ -10,7 +10,7 @@ require (
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/registry v1.8.1
-	github.com/sashabaranov/go-openai v1.42.1
+	github.com/sashabaranov/go-openai v1.43.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
