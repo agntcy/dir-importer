@@ -3,7 +3,7 @@ module github.com/agntcy/dir-importer
 go 1.27.1
 
 require (
-	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260908102259-bc6a98c20798.2
+	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20260929072728-9967424cbd6a.2
 	github.com/agntcy/dir/api v1.7.1
 	github.com/agntcy/dir/client v1.7.1
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
