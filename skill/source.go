@@ -63,12 +63,14 @@ func (s *SkillDirectorySet) walkFunc(ctx context.Context) fs.WalkDirFunc {
 		}
 
 		skillName := filepath.Join(name, skillFileName)
+
 		info, err := s.root.Stat(skillName)
 		if err != nil {
 			// A missing, dangling, absolute, or escaping SKILL.md is not a
 			// skill. Continue below it because a valid nested skill may exist.
-			return nil
+			return nil //nolint:nilerr // Invalid or escaping files are intentionally ignored.
 		}
+
 		if info.IsDir() {
 			return nil
 		}
@@ -79,7 +81,12 @@ func (s *SkillDirectorySet) walkFunc(ctx context.Context) fs.WalkDirFunc {
 }
 
 // Close releases the search-root handle.
-func (s *SkillDirectorySet) Close() error { return s.root.Close() }
+func (s *SkillDirectorySet) Close() error {
+	if err := s.root.Close(); err != nil {
+		return fmt.Errorf("close skill search root: %w", err)
+	}
+	return nil
+}
 
 // Paths returns display paths for the discovered skills.
 func (s *SkillDirectorySet) Paths() []string {

@@ -44,6 +44,7 @@ func CreateSkillArchiveFromDirectory(skillDir string) ([]byte, error) {
 		return nil, err
 	}
 	defer root.Close()
+
 	return createSkillArchiveFromRoot(root)
 }
 
@@ -52,10 +53,12 @@ func openSkillRoot(skillDir string) (*os.Root, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	root, err := os.OpenRoot(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("open skill directory: %w", err)
 	}
+
 	return root, nil
 }
 
@@ -64,6 +67,7 @@ func createSkillArchiveFromRoot(root *os.Root) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return encodeSkillArchive(root, files)
 }
 

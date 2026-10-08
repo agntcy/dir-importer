@@ -65,6 +65,7 @@ func (f *agentSkillDirFetcher) Fetch(ctx context.Context) (<-chan types.SourceIt
 		defer skillSet.Close()
 
 		skillDirs := skillSet.Paths()
+
 		var emitted int
 
 		for i, skillDir := range skillDirs {

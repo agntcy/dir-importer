@@ -30,6 +30,7 @@ func parseSkillRootForImport(root *os.Root, displayPath string) (*structpb.Struc
 	if err != nil {
 		return nil, err
 	}
+
 	if !isBundle {
 		return parseSkillRoot(root, displayPath)
 	}
@@ -38,6 +39,7 @@ func parseSkillRootForImport(root *os.Root, displayPath string) (*structpb.Struc
 	if err != nil {
 		return nil, err
 	}
+
 	archive, err := createSkillArchiveFromRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("create skill archive: %w", err)
@@ -60,6 +62,7 @@ func ParseSkillDirectoryBundle(skillDir string) (*structpb.Struct, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	archive, err := createSkillArchiveFromRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("create skill archive: %w", err)
@@ -89,9 +92,11 @@ func isSkillBundleRoot(root *os.Root) (bool, error) {
 		if err != nil {
 			return err
 		}
+
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
+
 		if normalizeArchiveEntryPath(walkPath) != skillFileName {
 			hasExtra = true
 			return fs.SkipAll
