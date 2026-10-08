@@ -45,12 +45,20 @@ func ParseSkillDirectory(skillDir string) (*structpb.Struct, error) {
 		return nil, errors.New("skill path must be a directory")
 	}
 
-	skillPath := filepath.Join(absDir, "SKILL.md")
+	root, err := os.OpenRoot(absDir)
+	if err != nil {
+		return nil, fmt.Errorf("open skill directory: %w", err)
+	}
+	defer root.Close()
 
-	raw, err := os.ReadFile(skillPath)
+	return parseSkillRoot(root, absDir)
+}
+
+func parseSkillRoot(root *os.Root, displayPath string) (*structpb.Struct, error) {
+	raw, err := root.ReadFile(skillFileName)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("missing SKILL.md in %s", absDir)
+			return nil, fmt.Errorf("missing SKILL.md in %s", displayPath)
 		}
 
 		return nil, fmt.Errorf("read SKILL.md: %w", err)
@@ -74,7 +82,7 @@ func ParseSkillDirectory(skillDir string) (*structpb.Struct, error) {
 
 	body = strings.TrimSpace(body)
 
-	fields, err := skillPayloadFields(&fm, absDir, body, string(raw))
+	fields, err := skillPayloadFields(&fm, displayPath, body, string(raw))
 	if err != nil {
 		return nil, err
 	}

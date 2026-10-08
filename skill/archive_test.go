@@ -7,6 +7,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -240,4 +241,44 @@ func containsPath(paths []string, want string) bool {
 	}
 
 	return false
+}
+
+func TestDirectorySet_ParseForImport_RejectsDirectorySwapOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	searchRoot := filepath.Join(parent, "skills")
+	skillDir := filepath.Join(searchRoot, "demo")
+	outside := filepath.Join(parent, "outside")
+
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(validSkillMD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outsideMD := "---\nname: outside\ndescription: Must not be imported.\n---\n\nSecret.\n"
+	if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte(outsideMD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err := OpenSkillDirectories(context.Background(), searchRoot)
+	if err != nil {
+		t.Fatalf("OpenSkillDirectories: %v", err)
+	}
+	defer set.Close()
+
+	if err := os.RemoveAll(skillDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, skillDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := set.ParseForImport(0); err == nil {
+		t.Fatal("ParseForImport followed a replacement symlink outside the held search root")
+	}
 }
