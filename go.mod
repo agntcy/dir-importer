@@ -3,13 +3,13 @@ module github.com/agntcy/dir-importer
 go 1.27.3
 
 require (
-	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20261006093657-2c7c88d8533b.2
+	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20261106120914-497c7a1ca059.2
 	github.com/agntcy/dir/api v1.9.0
 	github.com/agntcy/dir/client v1.9.0
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/miekg/dns v1.1.73
-	github.com/modelcontextprotocol/registry v1.8.1
+	github.com/modelcontextprotocol/registry v1.8.9
 	github.com/sashabaranov/go-openai v1.43.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/time v0.16.0
