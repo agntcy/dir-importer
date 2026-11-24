@@ -1,11 +1,11 @@
 module github.com/agntcy/dir-importer
 
-go 1.27.3
+go 1.27.4
 
 require (
 	buf.build/gen/go/agntcy/oasf/protocolbuffers/go v1.36.12-20261106120914-497c7a1ca059.2
-	github.com/agntcy/dir/api v1.9.0
-	github.com/agntcy/dir/client v1.9.0
+	github.com/agntcy/dir/api v1.9.1
+	github.com/agntcy/dir/client v1.9.1
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
 	github.com/mark3labs/mcp-go v1.6.0
 	github.com/miekg/dns v1.1.73

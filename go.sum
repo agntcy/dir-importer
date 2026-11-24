@@ -6,10 +6,10 @@ buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-202608252041
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2/go.mod h1:TCt1lluMFnctISJXvkIQ4x3ABrPuUKCWKyjKdkJNBpw=
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/agntcy/dir/api v1.9.0 h1:vrbcs0XuLZOYplk74rHH6k8ZMdYwRaEXJQsqkcTWofM=
-github.com/agntcy/dir/api v1.9.0/go.mod h1:4W6pQIAKCJskInp3kNjMvtN59+WU17/8tBNQewg8c20=
-github.com/agntcy/dir/client v1.9.0 h1:ppmhkjPVgtwMxqpTgtI+usYvtg3a04qw0lHyaInN5ck=
-github.com/agntcy/dir/client v1.9.0/go.mod h1:LOvZ9eodOTzUFYtGNwNNFufSYwrtKGPPujyNwfs+WWE=
+github.com/agntcy/dir/api v1.9.1 h1:0ccaBslzBTltfFHVwPSyFdGFoigapA6pjWBiixliliY=
+github.com/agntcy/dir/api v1.9.1/go.mod h1:akaqGOLImfy96sb6jfb6WIanONNpIKeGFyhDxRt7zg8=
+github.com/agntcy/dir/client v1.9.1 h1:gbcZKx+nrY7P8Nipoiovo/QkEcmQ1dRAT+PDJqLNfe0=
+github.com/agntcy/dir/client v1.9.1/go.mod h1:YIHk5OYBKHWMH8FHFm5/r5Da8LubSnzTZ+E7NdPZ5tY=
 github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a h1:PmcWcS60Q3QBRiAFlWMyUKTMLpVd7BbLtJ3tyfpJgK4=
 github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a/go.mod h1:yKdXbsWbDhZ7lmc7zsd/VJSjYIbFsoSTWSnhTxdAOzU=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
