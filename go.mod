@@ -7,7 +7,7 @@ require (
 	github.com/agntcy/dir/api v1.9.0
 	github.com/agntcy/dir/client v1.9.0
 	github.com/agntcy/oasf-sdk/pkg v1.3.1-0.20260910081500-f0c6172a010a
-	github.com/mark3labs/mcp-go v0.58.0
+	github.com/mark3labs/mcp-go v1.6.0
 	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/registry v1.8.9
 	github.com/sashabaranov/go-openai v1.43.0
