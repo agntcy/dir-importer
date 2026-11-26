@@ -19,6 +19,11 @@ type openAIClient struct {
 }
 
 func newOpenAIClientFromModel(model string) (*openAIClient, error) {
+	// Accept the LiteLLM-style "azure/<deployment>" spelling as an alias for "azure:<deployment>".
+	if rest, ok := strings.CutPrefix(model, "azure/"); ok {
+		model = "azure:" + rest
+	}
+
 	switch {
 	case strings.HasPrefix(model, "azure:"):
 		return newAzureClient(model)
@@ -56,17 +61,19 @@ func newAzureClient(fullModel string) (*openAIClient, error) {
 		cfg.APIVersion = v
 	}
 
-	cfg.AzureModelMapperFunc = func(model string) string {
-		if dep := os.Getenv("AZURE_OPENAI_DEPLOYMENT"); dep != "" {
-			return dep
-		}
-
-		return strings.TrimPrefix(strings.TrimSpace(model), "azure:")
+	// Deployment name: AZURE_OPENAI_DEPLOYMENT wins, otherwise the part after "azure:".
+	// It is used both in the request URL (via the mapper) and as the request body "model",
+	// which Azure ignores but Azure-fronting gateways route on, so it must not carry the prefix.
+	deployment := strings.TrimSpace(os.Getenv("AZURE_OPENAI_DEPLOYMENT"))
+	if deployment == "" {
+		deployment = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(fullModel), "azure:"))
 	}
+
+	cfg.AzureModelMapperFunc = func(string) string { return deployment }
 
 	return &openAIClient{
 		client: openai.NewClientWithConfig(cfg),
-		model:  fullModel,
+		model:  deployment,
 	}, nil
 }
 
