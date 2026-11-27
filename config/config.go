@@ -38,6 +38,10 @@ const (
 	// <cid>.record.json files it writes can be reviewed, edited, and re-imported
 	// unchanged via this import type instead of switching to the separate push command.
 	ImportTypeOASF ImportType = "oasf"
+	// ImportTypeAICatalog imports an AI Catalog document (application/ai-catalog+json)
+	// from a local JSON file, or from a directory of such files (see FilePath).
+	// Each inline entry becomes one OASF record. URL-only entries are rejected.
+	ImportTypeAICatalog ImportType = "ai-catalog"
 )
 
 // ClientInterface defines the interface for the DIR client used by importers.
@@ -55,10 +59,11 @@ type SignFunc func(ctx context.Context, cid string) error
 type Config struct {
 	Type        ImportType // Import kind (--type); see ImportType* constants
 	RegistryURL string     // Base URL of the registry (when Type is registry-based)
-	// FilePath is the source when Type is file-based. For mcp, a2a and oasf it is
-	// either a JSON file or a directory, in which case every *.json file directly
-	// inside it is imported (not recursive). For agent-skill it is a skill
-	// directory, or a root whose nested skill directories are found recursively.
+	// FilePath is the source when Type is file-based. For mcp, a2a, oasf and
+	// ai-catalog it is either a JSON file or a directory, in which case every
+	// *.json file directly inside it is imported (not recursive). For agent-skill
+	// it is a skill directory, or a root whose nested skill directories are found
+	// recursively.
 	FilePath  string
 	Filters   map[string]string // Registry-specific filters
 	Limit     int               // Number of records to import (default: 0 for all)
@@ -91,9 +96,9 @@ func (c *Config) Validate() error {
 		if c.RegistryURL == "" {
 			return errors.New("registry URL is required when import type is mcp-registry")
 		}
-	case ImportTypeMCP, ImportTypeA2A, ImportTypeAgentSkill, ImportTypeOASF:
+	case ImportTypeMCP, ImportTypeA2A, ImportTypeAgentSkill, ImportTypeOASF, ImportTypeAICatalog:
 		if c.FilePath == "" {
-			return errors.New("file path is required when import type is mcp, a2a, agent-skill, or oasf")
+			return errors.New("file path is required when import type is mcp, a2a, agent-skill, oasf, or ai-catalog")
 		}
 	default:
 		return fmt.Errorf("unsupported import type: %s", c.Type)

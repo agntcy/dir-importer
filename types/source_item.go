@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	catalogv1 "github.com/agntcy/dir/api/catalog/v1"
 	mcpapiv0 "github.com/modelcontextprotocol/registry/pkg/api/v0"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -23,16 +24,19 @@ const (
 	SourceKindAgentSkill
 	// SourceKindOASF is a record already in OASF format as [structpb.Struct] (e.g. --dry-run output re-imported).
 	SourceKindOASF
+	// SourceKindAICatalog is one AI Catalog entry. A container entry carries its nested catalog in Data.
+	SourceKindAICatalog
 )
 
 // SourceItem is one record from fetch through dedup before OASF transformation.
 // SourceItem.Kind selects which field is valid.
 type SourceItem struct {
-	Kind  SourceKind
-	MCP   mcpapiv0.ServerResponse
-	A2A   *structpb.Struct
-	Skill *structpb.Struct
-	OASF  *structpb.Struct
+	Kind    SourceKind
+	MCP     mcpapiv0.ServerResponse
+	A2A     *structpb.Struct
+	Skill   *structpb.Struct
+	OASF    *structpb.Struct
+	Catalog *catalogv1.CatalogEntry
 }
 
 // MCPSourceItem wraps an MCP server response for the pipeline.
@@ -55,6 +59,11 @@ func OASFSourceItem(record *structpb.Struct) SourceItem {
 	return SourceItem{Kind: SourceKindOASF, OASF: record}
 }
 
+// AICatalogSourceItem wraps one AI Catalog entry for the pipeline.
+func AICatalogSourceItem(entry *catalogv1.CatalogEntry) SourceItem {
+	return SourceItem{Kind: SourceKindAICatalog, Catalog: entry}
+}
+
 // defaultVersion is used for NameVersion when a source item has a name but no
 // version (e.g. an AgentCard, Agent Skill, or OASF record that omits it).
 const defaultVersion = "v1.0.0"
@@ -72,6 +81,8 @@ func (s SourceItem) NameVersion() string {
 		return nameVersion(agentSkillNameVersionFields(s.Skill))
 	case SourceKindOASF:
 		return nameVersion(topLevelNameVersionFields(s.OASF))
+	case SourceKindAICatalog:
+		return nameVersion(catalogNameVersion(s.Catalog))
 	}
 
 	return ""
@@ -110,6 +121,14 @@ func topLevelNameVersionFields(card *structpb.Struct) (string, string) {
 	}
 
 	return name, version
+}
+
+func catalogNameVersion(entry *catalogv1.CatalogEntry) (string, string) {
+	if entry == nil {
+		return "", ""
+	}
+
+	return strings.TrimSpace(entry.GetDisplayName()), strings.TrimSpace(entry.GetVersion())
 }
 
 func agentSkillNameVersionFields(skill *structpb.Struct) (string, string) {

@@ -166,6 +166,9 @@ func (t *Transformer) TransformRecord(item types.SourceItem) (*corev1.Record, er
 
 		return record, nil
 
+	case types.SourceKindAICatalog:
+		return t.convertAICatalogToOASF(item.Catalog)
+
 	case types.SourceKindOASF:
 		if item.OASF == nil {
 			return nil, fmt.Errorf("OASF source item missing record struct")

@@ -475,6 +475,10 @@ func TestModulesByImportType_OASFTypeHasNoEntry(t *testing.T) {
 	if _, ok := modulesByImportType[config.ImportTypeOASF]; ok {
 		t.Error("ImportTypeOASF should have no entry in modulesByImportType (relies on findCandidates skipping the module filter)")
 	}
+
+	if _, ok := modulesByImportType[config.ImportTypeAICatalog]; ok {
+		t.Error("ImportTypeAICatalog should have no entry in modulesByImportType (a catalog file can produce records with different module sets)")
+	}
 }
 
 // TestIsDuplicate_OASFFindsModuleLessCandidate: a bare OASF record with no

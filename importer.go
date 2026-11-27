@@ -36,7 +36,7 @@ type Importer struct {
 	pusher      types.Pusher
 }
 
-// New creates a new importer instance (MCP registry/file, A2A file, Agent Skill directory tree, or OASF file).
+// New creates a new importer instance (MCP registry/file, A2A file, Agent Skill directory tree, OASF file, or AI Catalog file).
 func New(ctx context.Context, client config.ClientInterface, cfg config.Config) (types.Importer, error) {
 	var (
 		fetch types.Fetcher
@@ -54,6 +54,8 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 		fetch, err = fetcher.NewAgentSkillDirFetcher(cfg.FilePath)
 	case config.ImportTypeOASF:
 		fetch, err = fetcher.NewOASFFileFetcher(cfg.FilePath)
+	case config.ImportTypeAICatalog:
+		fetch, err = fetcher.NewAICatalogFileFetcher(cfg.FilePath)
 	default:
 		return nil, fmt.Errorf("unsupported import type: %s", cfg.Type)
 	}
@@ -73,6 +75,13 @@ func New(ctx context.Context, client config.ClientInterface, cfg config.Config) 
 	e, err := newEnricher(ctx, cfg.Enricher)
 	if err != nil {
 		return nil, err
+	}
+
+	// Catalog tags already carry OASF skills and domains. The configured enricher
+	// replaces those, so keep them when they are present and only enrich entries
+	// that arrived without taxonomy.
+	if cfg.Type == config.ImportTypeAICatalog {
+		e = enricher.PreserveTaxonomy(e)
 	}
 
 	return &Importer{
