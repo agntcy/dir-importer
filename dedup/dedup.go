@@ -32,9 +32,10 @@ const (
 // modulesByImportType maps each import type to the module names that scope
 // the per-item duplicate lookup.
 //
-// config.ImportTypeOASF has no entry by design: OASF has no notion of a
-// required module, so findCandidates skips module scoping for it instead of
-// requiring one of the known modules.
+// config.ImportTypeOASF and config.ImportTypeAICatalog have no entry by design.
+// OASF has no required module, and one AI Catalog file can produce records with
+// different module sets, so findCandidates skips module scoping for both and
+// relies on the content hash.
 var modulesByImportType = map[config.ImportType][]string{
 	config.ImportTypeMCPRegistry: {moduleMCPCurrent, moduleMCPLegacy},
 	config.ImportTypeMCP:         {moduleMCPCurrent, moduleMCPLegacy},

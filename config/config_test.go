@@ -128,6 +128,22 @@ func TestValidate_TypeDispatch(t *testing.T) {
 				Enricher: staticEnricher(),
 			},
 		},
+		{
+			name: "ai-catalog file import without FilePath is rejected",
+			cfg: importerconfig.Config{
+				Type:     importerconfig.ImportTypeAICatalog,
+				Enricher: staticEnricher(),
+			},
+			wantErrText: errFilePathRequired,
+		},
+		{
+			name: "ai-catalog file import with FilePath is accepted",
+			cfg: importerconfig.Config{
+				Type:     importerconfig.ImportTypeAICatalog,
+				FilePath: testFilePath,
+				Enricher: staticEnricher(),
+			},
+		},
 	}
 
 	for _, tt := range tests {
